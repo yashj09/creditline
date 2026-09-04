@@ -12,3 +12,7 @@ export * from "./wallet/types.ts";
 export * from "./wallet/local.ts";
 export * from "./wallet/circle.ts";
 export * from "./audit/log.ts";
+export * from "./markets/index.ts";
+export * from "./plan/schema.ts";
+export * from "./plan/build.ts";
+export * from "./sim/simulate.ts";
