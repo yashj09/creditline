@@ -1,0 +1,15 @@
+{
+  "name": "mandate",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Claude executes real on-chain financial actions inside limits you set, with a hardware tap for anything irreversible.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.19.0",
+  "scripts": {
+    "contracts:build": "forge build --root contracts",
+    "contracts:test": "forge test --root contracts -vv",
+    "typecheck": "pnpm -r typecheck",
+    "dev": "pnpm --filter @mandate/web dev",
+    "e2e": "pnpm --filter @mandate/core e2e"
+  }
+}
