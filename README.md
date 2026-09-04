@@ -8,7 +8,20 @@ Tell the agent *"I need 500 USDC on Arc by Friday to pay Acme. Don't sell my ETH
 
 ## Status
 
-Day 1 — smart contracts. See `docs/` and the plan in the repo root of the hackathon workspace.
+Day 1–2 (Sept 5): contracts + core done and tested; testnet deployment pending funded keys.
+
+- `contracts/`: `forge test` — 25 unit tests + a Base Sepolia fork test that supplies WETH, borrows real Circle USDC from Compound v3 through the account, and executes a guardian-signed CCTP burn towards Arc.
+- `packages/core`: execution encoders, Circle/local agent wallets, standardized-subgraph market fetcher, deterministic plan builder, step simulation, JSONL audit, `scripts/e2e.ts`.
+
+### Run
+
+```bash
+git clone --recursive <repo> && cd mandate && pnpm install
+cd contracts && forge test                                  # unit tests
+BASE_SEPOLIA_RPC=https://sepolia.base.org forge test --match-contract Fork -vv   # fork test
+cd ../packages/core && pnpm gen:abi && pnpm typecheck && pnpm test
+GRAPH_API_KEY=… pnpm exec tsx scripts/probe-markets.ts     # venue table from The Graph
+```
 
 ## Layout
 
