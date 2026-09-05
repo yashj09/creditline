@@ -49,7 +49,8 @@ export interface Deployment {
 
 /** Reads contracts/deployments/<name>.json written by script/Deploy.s.sol. */
 export function loadDeployment(name: "base-sepolia" | "arc-testnet" | "arb-sepolia" | "arc"): Deployment | null {
-  const p = resolve(import.meta.dirname, "../../../contracts/deployments", `${name}.json`);
+  const dir = process.env.MANDATE_DEPLOYMENTS_DIR ?? resolve(process.cwd(), "../../contracts/deployments");
+  const p = resolve(dir, `${name}.json`);
   if (!existsSync(p)) return null;
   return JSON.parse(readFileSync(p, "utf8")) as Deployment;
 }
