@@ -126,6 +126,9 @@ importers:
       ai:
         specifier: ^7.0.93
         version: 7.0.93(zod@4.5.4)
+      dotenv:
+        specifier: ^17.2.0
+        version: 17.4.2
       viem:
         specifier: ^2.56.3
         version: 2.56.3(typescript@5.9.3)(zod@4.5.4)
@@ -136,6 +139,9 @@ importers:
       '@types/node':
         specifier: ^22.18.0
         version: 22.20.1
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.13
       typescript:
         specifier: ^5.9.0
         version: 5.9.3

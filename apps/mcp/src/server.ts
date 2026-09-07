@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import type { Hex } from "viem";
-import { IntentSchema } from "@mandate/core";
+import { IntentSchema, RepayIntentSchema } from "@mandate/core";
 import { SYSTEM_PROMPT, approvals, audit, buildApproval, plans, tools, verifyApproval } from "@mandate/agent";
 
 const server = new McpServer({ name: "mandate", version: "0.1.0" }, { instructions: SYSTEM_PROMPT });
@@ -34,6 +34,8 @@ server.registerTool("get_markets", { description: desc(tools.get_markets), input
 server.registerTool("draft_plan", { description: desc(tools.draft_plan), inputSchema: { intent: IntentSchema } }, async (a) => json(await run(tools.draft_plan, a)));
 server.registerTool("simulate_plan", { description: desc(tools.simulate_plan), inputSchema: { planId: z.string() } }, async (a) => json(await run(tools.simulate_plan, a)));
 server.registerTool("get_plan", { description: desc(tools.get_plan), inputSchema: { planId: z.string() } }, async (a) => json(await run(tools.get_plan, a)));
+server.registerTool("check_repayments", { description: desc(tools.check_repayments), inputSchema: {} }, async () => json(await run(tools.check_repayments, {})));
+server.registerTool("draft_repayment_plan", { description: desc(tools.draft_repayment_plan), inputSchema: { intent: RepayIntentSchema } }, async (a) => json(await run(tools.draft_repayment_plan, a)));
 server.registerTool("get_audit", { description: desc(tools.get_audit), inputSchema: { planId: z.string().optional() } }, async (a) => json(await run(tools.get_audit, a)));
 
 server.registerTool(
