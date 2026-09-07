@@ -6,6 +6,8 @@ import {
   BASE_SEPOLIA,
   CCTP,
   IntentSchema,
+  RepayIntentSchema,
+  buildRepaymentPlan,
   MandateAccountAbi,
   buildLiquidityPlan,
   encodeExecute,
@@ -184,14 +186,22 @@ export const tools = {
         let txHash: Hex;
         let summary = step.title;
         if (step.kind === "bridge_relay") {
-          const burn = plan.steps.find((s) => s.kind === "bridge_burn");
+          const burn = plan.steps.find((s) => s.kind === "bridge_burn" && s.index < step.index);
           if (!burn?.txHash) throw new Error("bridge burn tx missing");
-          const att = await waitForAttestation(BASE_SEPOLIA.domain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
-          const before = await usdcBalance(rt.arcPub, ARC_TESTNET.usdc, rt.account);
+          const srcDomain = burn.chainId === 84532 ? BASE_SEPOLIA.domain : ARC_TESTNET.domain;
+          const dstPub = step.chainId === 84532 ? rt.basePub : rt.arcPub;
+          const dstUsdc = step.chainId === 84532 ? BASE_SEPOLIA.usdc : ARC_TESTNET.usdc;
+          const att = await waitForAttestation(srcDomain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
+          const before = await usdcBalance(dstPub, dstUsdc, rt.account);
           txHash = await rt.wallet.send({ chainId: chain.id, to: CCTP.messageTransmitterV2, data: encodeReceiveMessage(att) });
-          const after = await usdcBalance(rt.arcPub, ARC_TESTNET.usdc, rt.account);
-          summary = `Minted ${fmtUsdc(after - before)} USDC on Arc`;
+          const after = await usdcBalance(dstPub, dstUsdc, rt.account);
+          summary = `Minted ${fmtUsdc(after - before)} USDC on ${chain.name}`;
+        } else if (step.kind === "mark_repaid") {
+          if (!step.direct) throw new Error("mark_repaid step missing calldata");
+          txHash = await rt.wallet.send({ chainId: chain.id, to: step.direct.to as Address, data: step.direct.data as Hex });
+          summary = step.title;
         } else if (step.kind === "schedule_repayment") {
+          if (plan.intent.kind !== "liquidity") throw new Error("schedule_repayment only applies to liquidity plans");
           const dueAt = BigInt(Math.floor(Date.now() / 1000) + plan.intent.repayInDays * 86400);
           const amount = BigInt(Math.round(plan.intent.amountUsdc * 1e6));
           txHash = await rt.wallet.send({ chainId: chain.id, to: rt.account, data: encodeScheduleRepayment(dueAt, amount, BASE_SEPOLIA.comet) });
@@ -228,6 +238,38 @@ export const tools = {
         audit.write({ planId, step: idx, kind: "error", summary: msg });
         return { ok: false, step: idx, error: msg };
       }
+    },
+  }),
+
+  check_repayments: tool({
+    description: "List repayment intents recorded on the Arc account (due date, amount, done). Use to remind the user or to start a repayment plan.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const rt = await getRuntime();
+      const n = await rt.arcPub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "repaymentCount" });
+      const items = [];
+      for (let i = 0n; i < n; i++) {
+        const [dueAt, amount, venue, done] = await rt.arcPub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "repayments", args: [i] });
+        const dueMs = Number(dueAt) * 1000;
+        items.push({ id: Number(i), dueAt: new Date(dueMs).toISOString(), amountUsdc: fmtUsdc(amount), venue, done, daysLeft: Math.round((dueMs - Date.now()) / 86_400_000), overdue: !done && dueMs < Date.now() });
+      }
+      const pos = await readCometPosition(rt.basePub, rt.account);
+      return { repayments: items, currentDebtUsdc: fmtUsdc(pos.debtUsdc), healthFactor: Number.isFinite(pos.healthFactor) ? pos.healthFactor.toFixed(2) : "∞" };
+    },
+  }),
+
+  draft_repayment_plan: tool({
+    description: "Plan the reverse leg: bridge USDC back from Arc if needed, repay Compound v3 on Base Sepolia, withdraw freed collateral, close the repayment intent. Then simulate_plan and execute_step as usual.",
+    inputSchema: z.object({ intent: RepayIntentSchema }),
+    execute: async ({ intent }) => {
+      const rt = await getRuntime();
+      const arcBal = await usdcBalance(rt.arcPub, ARC_TESTNET.usdc, rt.account);
+      const arcNative = await rt.arcPub.getBalance({ address: rt.account });
+      const id = `repay-${Date.now().toString(36)}`;
+      const plan = await buildRepaymentPlan({ id, intent, account: rt.account, baseSepolia: rt.basePub, arcUsdcBalance6: arcBal + arcNative / 1_000_000_000_000n });
+      plans.save(plan);
+      audit.write({ planId: id, step: 0, kind: "plan", summary: `Repayment plan drafted: ${plan.steps.map((s) => s.title).join(" → ")}` });
+      return summarizePlan(plan);
     },
   }),
 

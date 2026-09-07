@@ -15,7 +15,7 @@ export const IntentSchema = z.object({
 });
 export type Intent = z.infer<typeof IntentSchema>;
 
-export const StepKind = z.enum(["supply_borrow", "bridge_burn", "bridge_relay", "pay", "schedule_repayment", "repay"]);
+export const StepKind = z.enum(["supply_borrow", "bridge_burn", "bridge_relay", "pay", "schedule_repayment", "repay", "mark_repaid"]);
 export type StepKind = z.infer<typeof StepKind>;
 
 export const CallSchema = z.object({ target: z.string(), value: z.string(), data: z.string() });
@@ -43,14 +43,22 @@ export const StepSchema = z.object({
 });
 export type Step = z.infer<typeof StepSchema>;
 
+export const RepayIntentSchema = z.object({
+  kind: z.literal("repay"),
+  amountUsdc: z.number().positive().describe("USDC to repay into the lending market"),
+  repaymentId: z.number().int().min(0).optional().describe("index in MandateAccount.repayments on Arc, if repaying a scheduled intent"),
+  withdrawCollateral: z.boolean().default(true).describe("withdraw freed WETH collateral after repaying"),
+});
+export type RepayIntent = z.infer<typeof RepayIntentSchema>;
+
 export const PlanSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
-  intent: IntentSchema,
+  intent: z.union([IntentSchema, RepayIntentSchema]),
   venueId: z.string(),
   venueExplanation: z.string(),
   account: z.string(),
-  collateralWeth: z.string(), // 18-dec string
+  collateralWeth: z.string(), // 18-dec string (collateral added, or withdrawn for repay plans)
   projected: z.object({ healthFactor: z.number(), liquidationPriceUsd: z.number().nullable(), borrowAprPct: z.number(), wethPriceUsd: z.number() }),
   steps: z.array(StepSchema),
 });

@@ -3,13 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "cron": "tsx scripts/cron.ts"
+  },
   "dependencies": {
     "@mandate/core": "workspace:*",
     "ai": "^7.0.93",
     "viem": "^2.56.3",
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "dotenv": "^17.2.0"
   },
-  "devDependencies": { "@types/node": "^22.18.0", "typescript": "^5.9.0" }
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0"
+  }
 }

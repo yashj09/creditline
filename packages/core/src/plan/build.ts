@@ -7,7 +7,10 @@ import { buildBurn } from "../exec/cctp.ts";
 import { buildSupplyAndBorrow, collateralFor, readCometPosition, type CometPosition } from "../exec/compound.ts";
 import { buildPay } from "../exec/pay.ts";
 import type { Ranked } from "../markets/venues.ts";
-import type { Intent, Plan, Step } from "./schema.ts";
+import type { Intent, Plan, RepayIntent, Step } from "./schema.ts";
+import { buildRepay } from "../exec/compound.ts";
+import { encodeFunctionData } from "viem";
+import { MandateAccountAbi } from "../abi/MandateAccount.ts";
 
 const ser = (calls: Call[]) => calls.map((c) => ({ target: c.target, value: c.value.toString(), data: c.data }));
 
@@ -92,6 +95,72 @@ export async function buildLiquidityPlan(params: {
     account,
     collateralWeth: weth.toString(),
     projected: { healthFactor: hf, liquidationPriceUsd: Number.isFinite(liq) ? liq : null, borrowAprPct: venue.borrowAprPct, wethPriceUsd: pos.wethPriceUsd },
+    steps,
+  };
+}
+
+
+/**
+ * Reverse leg: bridge USDC back from Arc, repay Compound v3 on Base Sepolia, free collateral, mark the intent done.
+ * The bridge burn on Arc is irreversible → guardian; repay + withdraw are reversible protocol actions → agent-only.
+ */
+export async function buildRepaymentPlan(params: {
+  id: string;
+  intent: RepayIntent;
+  account: Address;
+  baseSepolia: PublicClient;
+  arcUsdcBalance6: bigint;
+}): Promise<Plan> {
+  const { intent, account } = params;
+  const amount = parseUnits(intent.amountUsdc.toString(), 6);
+  const pos = await readCometPosition(params.baseSepolia, account);
+  if (pos.debtUsdc === 0n) throw new Error("no Compound debt to repay");
+  const repayAmt = amount > pos.debtUsdc ? pos.debtUsdc : amount;
+  const remainingDebtUsd = Number(pos.debtUsdc - repayAmt) / 1e6;
+  // withdraw collateral only if debt is fully cleared (keeps it simple and always safe)
+  const withdrawWeth = intent.withdrawCollateral && remainingDebtUsd === 0 ? pos.collateralWeth : 0n;
+  const hf = remainingDebtUsd === 0 ? Number.POSITIVE_INFINITY : (pos.liquidateCollateralFactor * pos.collateralUsd) / remainingDebtUsd;
+
+  const steps: Step[] = [];
+  let idx = 1;
+  const needBridge = params.arcUsdcBalance6 >= repayAmt;
+  if (needBridge) {
+    const s1 = buildBurn({ usdc: ARC_TESTNET.usdc, amount: repayAmt, destinationDomain: BASE_SEPOLIA.domain, mintRecipient: account });
+    steps.push({
+      index: idx++, kind: "bridge_burn", chainId: ARC_TESTNET.chainId,
+      title: `Bridge ${Number(repayAmt) / 1e6} USDC back to Base (CCTP v2)`,
+      description: "Burns USDC on Arc for a mint on Base Sepolia (~1 block on Arc, then attestation). Irreversible → guardian approval.",
+      reversible: false, requiresGuardian: true, maxUsdcOut: repayAmt.toString(), calls: ser(s1), status: "pending",
+    });
+    steps.push({
+      index: idx++, kind: "bridge_relay", chainId: BASE_SEPOLIA.chainId,
+      title: "Mint on Base Sepolia", description: "Relay Circle's attestation to Base's MessageTransmitter (permissionless).",
+      reversible: true, requiresGuardian: false, maxUsdcOut: "0", calls: [], status: "pending", direct: { to: CCTP.messageTransmitterV2, data: "0x" },
+    });
+  }
+  const s3 = buildRepay(repayAmt, withdrawWeth);
+  steps.push({
+    index: idx++, kind: "repay", chainId: BASE_SEPOLIA.chainId,
+    title: `Repay ${Number(repayAmt) / 1e6} USDC on Compound v3${withdrawWeth > 0n ? " and withdraw collateral" : ""}`,
+    description: withdrawWeth > 0n
+      ? `Clears the debt and withdraws ${(Number(withdrawWeth) / 1e18).toFixed(4)} WETH back to the account.`
+      : `Reduces debt to ${remainingDebtUsd.toFixed(2)} USDC; projected health factor ${Number.isFinite(hf) ? hf.toFixed(2) : "∞"}.`,
+    reversible: true, requiresGuardian: false, maxUsdcOut: repayAmt.toString(), calls: ser(s3), status: "pending",
+  });
+  if (intent.repaymentId !== undefined) {
+    steps.push({
+      index: idx++, kind: "mark_repaid", chainId: ARC_TESTNET.chainId,
+      title: `Mark repayment #${intent.repaymentId} done`, description: "Closes the repayment intent recorded on the Arc account.",
+      reversible: true, requiresGuardian: false, maxUsdcOut: "0", calls: [], status: "pending",
+      direct: { to: account, data: encodeFunctionData({ abi: MandateAccountAbi, functionName: "markRepaid", args: [BigInt(intent.repaymentId)] }) },
+    });
+  }
+
+  return {
+    id: params.id, createdAt: new Date().toISOString(), intent, venueId: "compound-v3-base-sepolia",
+    venueExplanation: needBridge ? "Funds come back from Arc over CCTP, then repay Compound v3 on Base Sepolia." : "Repaying from USDC already on Base Sepolia.",
+    account, collateralWeth: withdrawWeth.toString(),
+    projected: { healthFactor: Number.isFinite(hf) ? hf : 1e9, liquidationPriceUsd: null, borrowAprPct: pos.borrowAprPct, wethPriceUsd: pos.wethPriceUsd },
     steps,
   };
 }
