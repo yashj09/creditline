@@ -6,6 +6,8 @@ export interface StepSimulation {
   ok: boolean;
   revertReason?: string;
   notes: string[];
+  /** true when only static checks ran because earlier steps have not executed yet */
+  deferred?: boolean;
 }
 
 function decodeRevert(data: Hex | undefined): string | undefined {
@@ -18,45 +20,51 @@ function decodeRevert(data: Hex | undefined): string | undefined {
   }
 }
 
+function selectorOf(data: Hex): Hex {
+  return (data.length >= 10 ? data.slice(0, 10) : "0x00000000") as Hex;
+}
+
 /**
- * Dry-runs a step. Inside-mandate steps are simulated as the agent calling `execute` (so policy and cap checks are
- * exercised for real). Guardian steps cannot be simulated through the account without a signature, so each inner
- * call is simulated with `from = account`, which exercises the protocol logic (approvals, CCTP burn limits, …).
+ * Dry-runs a step.
+ *  - Static check (always): every call's (target, selector) must be allow-listed; guardian flag must match.
+ *  - Dynamic check (only when all earlier steps are done, so the chain state is the one this step will see):
+ *      agent-only steps → simulate `execute` from the agent (exercises policy + caps for real);
+ *      guardian steps  → simulate the same calls as one batch via `ownerExecute` from the owner (no signature
+ *      needed for eth_call; exercises approvals/burn limits in sequence).
  */
 export async function simulateStep(
   client: PublicClient,
   step: Step,
-  ctx: { account: Address; agent: Address; planId: Hex },
+  ctx: { account: Address; agent: Address; owner: Address; planId: Hex; priorStepsDone: boolean },
 ): Promise<StepSimulation> {
   const notes: string[] = [];
   if (step.calls.length === 0) return { ok: true, notes: ["direct agent transaction; simulated at execution time"] };
   const calls = step.calls.map((c) => ({ target: c.target as Address, value: BigInt(c.value), data: c.data as Hex }));
 
-  if (!step.requiresGuardian) {
-    try {
-      await client.simulateContract({
-        address: ctx.account,
-        abi: MandateAccountAbi,
-        functionName: "execute",
-        args: [calls, ctx.planId, step.index],
-        account: ctx.agent,
-      });
-      notes.push("execute() passes policy and cap checks");
-      return { ok: true, notes };
-    } catch (e: any) {
-      const data: Hex | undefined = e?.cause?.data ?? e?.data;
-      return { ok: false, revertReason: decodeRevert(data) ?? e?.shortMessage ?? String(e), notes };
-    }
+  // static: policy
+  for (const c of calls) {
+    const p = await client.readContract({ address: ctx.account, abi: MandateAccountAbi, functionName: "policyFor", args: [c.target, selectorOf(c.data)] });
+    if (!p.allowed) return { ok: false, revertReason: `CallNotAllowed(${c.target}, ${selectorOf(c.data)})`, notes };
+    if (p.requiresGuardian && !step.requiresGuardian) return { ok: false, revertReason: `policy requires guardian for ${selectorOf(c.data)} but step is marked autonomous`, notes };
+  }
+  notes.push("policy allow-list ok");
+
+  if (!ctx.priorStepsDone) {
+    notes.push("dynamic simulation deferred until earlier steps execute");
+    return { ok: true, notes, deferred: true };
   }
 
-  for (const [i, c] of calls.entries()) {
-    try {
-      await client.call({ account: ctx.account, to: c.target, data: c.data, value: c.value });
-      notes.push(`call ${i + 1}/${calls.length} to ${c.target.slice(0, 10)}… ok`);
-    } catch (e: any) {
-      return { ok: false, revertReason: `call ${i + 1}: ${e?.shortMessage ?? String(e)}`, notes };
+  try {
+    if (!step.requiresGuardian) {
+      await client.simulateContract({ address: ctx.account, abi: MandateAccountAbi, functionName: "execute", args: [calls, ctx.planId, step.index], account: ctx.agent });
+      notes.push("execute() passes policy and cap checks");
+    } else {
+      await client.simulateContract({ address: ctx.account, abi: MandateAccountAbi, functionName: "ownerExecute", args: [calls], account: ctx.owner });
+      notes.push("calls succeed as a batch; guardian signature required before execution");
     }
+    return { ok: true, notes };
+  } catch (e: any) {
+    const data: Hex | undefined = e?.cause?.data ?? e?.data ?? e?.cause?.cause?.data;
+    return { ok: false, revertReason: decodeRevert(typeof data === "string" ? data : undefined) ?? e?.shortMessage ?? String(e), notes };
   }
-  notes.push("guardian signature required before execution");
-  return { ok: true, notes };
 }

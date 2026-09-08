@@ -151,6 +151,9 @@ importers:
       '@circle-fin/developer-controlled-wallets':
         specifier: ^10.8.0
         version: 10.8.0
+      dotenv:
+        specifier: ^17.2.0
+        version: 17.4.2
       viem:
         specifier: ^2.56.3
         version: 2.56.3(typescript@5.9.3)(zod@4.5.4)

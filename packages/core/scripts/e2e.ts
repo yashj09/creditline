@@ -55,7 +55,8 @@ const planId = `e2e-${Date.now()}`;
 const planIdHex = planIdToBytes32(planId);
 const chainMap = { [chains.baseSepolia.id]: chains.baseSepolia, [chains.arcTestnet.id]: chains.arcTestnet };
 
-const wallet: AgentWallet = process.env.CIRCLE_API_KEY
+const useCircle = !!(process.env.CIRCLE_API_KEY && process.env.CIRCLE_ENTITY_SECRET && process.env.CIRCLE_WALLET_SET_ID);
+const wallet: AgentWallet = useCircle
   ? new CircleAgentWallet({ apiKey: env("CIRCLE_API_KEY"), entitySecret: env("CIRCLE_ENTITY_SECRET"), walletSetId: env("CIRCLE_WALLET_SET_ID") })
   : new LocalAgentWallet(env("AGENT_PRIVATE_KEY") as Hex, chainMap);
 const guardian = privateKeyToAccount(env("GUARDIAN_PRIVATE_KEY") as Hex);
@@ -94,7 +95,8 @@ async function main() {
   if (bal < weth) throw new Error(`account needs ${weth} wei ETH on Base Sepolia for collateral, has ${bal}`);
   const s1 = buildSupplyAndBorrow(weth, borrow);
   const h1 = await wallet.send({ chainId: chains.baseSepolia.id, to: account, data: encodeExecute(s1, planIdHex, 1) });
-  const pos1 = await readCometPosition(basePub, account);
+  let pos1 = await readCometPosition(basePub, account);
+  for (let i = 0; i < 5 && pos1.debtUsdc === 0n; i++) { await new Promise((r) => setTimeout(r, 3000)); pos1 = await readCometPosition(basePub, account); } // public RPC lag
   audit.write({ planId, step: 1, kind: "execute", chainId: 84532, txHash: h1, explorer: explorerTx(chains.baseSepolia, h1), summary: `Supplied ${weth} wei WETH, borrowed ${borrow} USDC on Compound v3`, data: { healthFactor: pos1.healthFactor, liquidationPriceUsd: pos1.liquidationPriceUsd, borrowAprPct: pos1.borrowAprPct } });
   console.log(`step 1 ✓ ${explorerTx(chains.baseSepolia, h1)}  HF=${pos1.healthFactor.toFixed(2)} liq@$${pos1.liquidationPriceUsd?.toFixed(0)}`);
 
