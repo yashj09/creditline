@@ -34,7 +34,7 @@ contract ForkCompoundTest is Test {
         vm.createSelectFork(rpc);
         guardian = vm.addr(guardianPk);
 
-        MandateFactory factory = new MandateFactory();
+        MandateFactory factory = new MandateFactory(address(this));
         factory.configure(address(USDC), false);
         acct = MandateAccount(payable(factory.createAccount(owner, guardian, agent, keccak256("fork"))));
 

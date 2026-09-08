@@ -8,7 +8,7 @@ import {MandateAccount} from "./MandateAccount.sol";
 ///         (Base Sepolia for borrowing, Arc for settlement). Chain-specific USDC config lives here, not in
 ///         the account init code, precisely so the init code hash is identical everywhere.
 contract MandateFactory {
-    address public immutable deployer;
+    address public immutable deployer; // admin allowed to configure
     address public usdc;
     bool public nativeIsUsdc;
     bool public configured;
@@ -20,8 +20,10 @@ contract MandateFactory {
     error AlreadyConfigured();
     error NotConfigured();
 
-    constructor() {
-        deployer = msg.sender;
+    /// @param admin_ who may call `configure`. Passed explicitly because the factory is deployed through the
+    ///        canonical CREATE2 deployer, whose address would otherwise be `msg.sender`.
+    constructor(address admin_) {
+        deployer = admin_;
     }
 
     /// @notice One-time chain configuration by the deployer. Kept out of the constructor so the factory's own

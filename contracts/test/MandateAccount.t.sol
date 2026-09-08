@@ -33,7 +33,7 @@ contract MandateAccountTest is Test {
         bridge = new MockBridge(usdc);
 
         vm.startPrank(deployer);
-        factory = new MandateFactory();
+        factory = new MandateFactory(deployer);
         factory.configure(address(usdc), false);
         vm.stopPrank();
 
@@ -273,7 +273,7 @@ contract MandateAccountTest is Test {
 
     function test_nativeIsUsdc_countsNativeOutflow() public {
         vm.startPrank(deployer);
-        MandateFactory f2 = new MandateFactory();
+        MandateFactory f2 = new MandateFactory(deployer);
         f2.configure(address(usdc), true);
         vm.stopPrank();
         MandateAccount a2 = MandateAccount(payable(f2.createAccount(owner, guardian, agent, salt)));

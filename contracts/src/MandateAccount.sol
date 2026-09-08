@@ -73,7 +73,7 @@ contract MandateAccount is ReentrancyGuard {
 
     /// @notice ERC-20 USDC on this chain (on Arc this is the ERC-20 view of the native gas token).
     address public immutable USDC;
-    /// @notice True on chains where the native gas token is USDC (Arc). Native deltas then count as USDC.
+    /// @notice True on chains where the native gas token is USDC (Arc). Caps are then measured on the native balance.
     bool public immutable NATIVE_IS_USDC;
 
     Mandate public mandate;
@@ -376,10 +376,11 @@ contract MandateAccount is ReentrancyGuard {
         }
     }
 
-    /// @dev USDC-denominated balance of this account in 6-dec units, incl. native when native is USDC.
-    function _usdcBalance() internal view returns (uint256 bal) {
-        bal = IERC20(USDC).balanceOf(address(this));
-        if (NATIVE_IS_USDC) bal += address(this).balance / 1e12;
+    /// @dev USDC-denominated balance of this account in 6-dec units. On Arc the ERC-20 at 0x3600… is only a view over
+    ///      the native balance (same funds), so exactly one of the two is counted — never both.
+    function _usdcBalance() internal view returns (uint256) {
+        if (NATIVE_IS_USDC) return address(this).balance / 1e12;
+        return IERC20(USDC).balanceOf(address(this));
     }
 
     function _rollWindow() internal {

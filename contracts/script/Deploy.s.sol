@@ -23,7 +23,7 @@ contract Deploy is Script {
         (address usdc, bool nativeIsUsdc, string memory name) = _chainConfig();
 
         vm.startBroadcast(pk);
-        MandateFactory factory = new MandateFactory{salt: FACTORY_SALT}();
+        MandateFactory factory = new MandateFactory{salt: FACTORY_SALT}(vm.addr(pk));
         factory.configure(usdc, nativeIsUsdc);
         address account = factory.createAccount(owner, guardian, agent, salt);
         vm.stopBroadcast();
