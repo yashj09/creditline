@@ -16,7 +16,8 @@
   "dependencies": {
     "@circle-fin/developer-controlled-wallets": "^10.8.0",
     "viem": "^2.56.3",
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "dotenv": "^17.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

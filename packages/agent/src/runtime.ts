@@ -33,7 +33,8 @@ export async function getRuntime(): Promise<Runtime> {
     throw new Error("MandateAccount address differs between Base Sepolia and Arc — redeploy with the same salt and args.");
   }
   const chainMap = { [chains.baseSepolia.id]: chains.baseSepolia, [chains.arcTestnet.id]: chains.arcTestnet };
-  const wallet: AgentWallet = process.env.CIRCLE_API_KEY
+  const useCircle = !!(process.env.CIRCLE_API_KEY && process.env.CIRCLE_ENTITY_SECRET && process.env.CIRCLE_WALLET_SET_ID);
+  const wallet: AgentWallet = useCircle
     ? new CircleAgentWallet({
         apiKey: process.env.CIRCLE_API_KEY!,
         entitySecret: process.env.CIRCLE_ENTITY_SECRET!,

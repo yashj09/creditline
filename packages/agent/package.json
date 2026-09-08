@@ -8,7 +8,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "cron": "tsx scripts/cron.ts"
+    "cron": "tsx scripts/cron.ts",
+    "step": "tsx scripts/run-step.ts"
   },
   "dependencies": {
     "@mandate/core": "workspace:*",
