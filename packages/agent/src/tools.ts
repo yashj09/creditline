@@ -38,7 +38,7 @@ export const tools = {
     inputSchema: z.object({}),
     execute: async () => {
       const rt = await getRuntime();
-      const [ethBase, usdcBase, usdcArc, nativeArc, pos, mandate, dailyRemaining, nonce] = await Promise.all([
+      const [ethBase, usdcBase, usdcArc, nativeArc, pos, mandate, dailyRemaining, nonce, guardian] = await Promise.all([
         rt.basePub.getBalance({ address: rt.account }),
         usdcBalance(rt.basePub, BASE_SEPOLIA.usdc, rt.account),
         usdcBalance(rt.arcPub, ARC_TESTNET.usdc, rt.account),
@@ -47,13 +47,14 @@ export const tools = {
         rt.basePub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "mandate" }),
         rt.basePub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "dailyRemaining" }),
         rt.basePub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "guardianNonce" }),
+        rt.guardian(),
       ]);
       const [perTxCap, dailyCap, expiry] = mandate;
       return {
         account: rt.account,
         agent: rt.agent,
         agentWallet: rt.wallet.kind,
-        guardian: rt.guardian,
+        guardian,
         baseSepolia: { ethWei: ethBase.toString(), eth: Number(formatUnits(ethBase, 18)).toFixed(4), usdc: fmtUsdc(usdcBase) },
         arc: { usdcErc20: fmtUsdc(usdcArc), usdcNative: Number(formatUnits(nativeArc, 18)).toFixed(2) },
         compound: {
@@ -151,12 +152,15 @@ export const tools = {
       const plan = plans.get(planId);
       if (!plan) return { error: `unknown plan ${planId}` };
       const results = [];
+      let priorDone = true;
       for (const step of plan.steps) {
+        if (step.status === "done") { results.push({ step: step.index, title: step.title, ok: true, notes: ["already executed"] }); continue; }
         const pub = step.chainId === 84532 ? rt.basePub : rt.arcPub;
-        const sim = await simulateStep(pub, step, { account: rt.account, agent: rt.agent, planId: planIdToBytes32(plan.id) });
+        const sim = await simulateStep(pub, step, { account: rt.account, agent: rt.agent, owner: rt.base.owner, planId: planIdToBytes32(plan.id), priorStepsDone: priorDone });
         step.simulation = sim;
-        step.status = sim.ok ? "simulated" : "failed";
-        results.push({ step: step.index, title: step.title, ok: sim.ok, revertReason: sim.revertReason, notes: sim.notes });
+        if (step.status !== "executing" && step.status !== "awaiting_guardian") step.status = sim.ok ? "simulated" : "failed";
+        results.push({ step: step.index, title: step.title, ok: sim.ok, deferred: sim.deferred, revertReason: sim.revertReason, notes: sim.notes });
+        priorDone = false; // only the first not-yet-executed step gets a dynamic simulation
       }
       plans.save(plan);
       audit.write({ planId, step: 0, kind: "simulate", summary: `Simulation: ${results.filter((r) => r.ok).length}/${results.length} steps ok` });
@@ -194,7 +198,11 @@ export const tools = {
           const att = await waitForAttestation(srcDomain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
           const before = await usdcBalance(dstPub, dstUsdc, rt.account);
           txHash = await rt.wallet.send({ chainId: chain.id, to: CCTP.messageTransmitterV2, data: encodeReceiveMessage(att) });
-          const after = await usdcBalance(dstPub, dstUsdc, rt.account);
+          let after = before;
+          for (let i = 0; i < 6 && after <= before; i++) { // public RPCs can lag the receipt by a few seconds
+            await new Promise((r) => setTimeout(r, 2_500));
+            after = await usdcBalance(dstPub, dstUsdc, rt.account);
+          }
           summary = `Minted ${fmtUsdc(after - before)} USDC on ${chain.name}`;
         } else if (step.kind === "mark_repaid") {
           if (!step.direct) throw new Error("mark_repaid step missing calldata");

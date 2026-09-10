@@ -28,7 +28,7 @@ export async function buildApproval(plan: Plan, step: Step, ttlSeconds = 15 * 60
     args: [fields.planId, fields.step, fields.maxUsdcOut, fields.callsHash, fields.deadline, fields.nonce],
   });
   if (onchain !== text) throw new Error("approval text mismatch between client mirror and contract");
-  return { text, deadline: deadline.toString(), nonce: nonce.toString(), guardian: rt.guardian, chainId: step.chainId };
+  return { text, deadline: deadline.toString(), nonce: nonce.toString(), guardian: await rt.guardian(), chainId: step.chainId };
 }
 
 export async function verifyApproval(guardian: Hex, text: string, signature: Hex) {

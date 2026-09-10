@@ -1,5 +1,6 @@
 import { createPublicClient, http, type Address, type Hex, type PublicClient } from "viem";
 import {
+  MandateAccountAbi,
   CircleAgentWallet,
   LocalAgentWallet,
   chains,
@@ -12,7 +13,8 @@ export interface Runtime {
   base: Deployment;
   arc: Deployment;
   account: Address;
-  guardian: Address;
+  /** Live on-chain guardian (the contract is the source of truth; .env is only a hint at deploy time). */
+  guardian: () => Promise<Address>;
   agent: Address;
   wallet: AgentWallet;
   basePub: PublicClient;
@@ -42,14 +44,15 @@ export async function getRuntime(): Promise<Runtime> {
       })
     : new LocalAgentWallet(requireEnv("AGENT_PRIVATE_KEY") as Hex, chainMap);
 
+  const basePub = createPublicClient({ chain: chains.baseSepolia, transport: http() });
   cached = {
     base,
     arc,
     account: base.account,
-    guardian: (process.env.GUARDIAN_ADDRESS as Address | undefined) ?? base.guardian,
+    guardian: () => basePub.readContract({ address: base.account, abi: MandateAccountAbi, functionName: "guardian" }),
     agent: await wallet.address(chains.baseSepolia.id),
     wallet,
-    basePub: createPublicClient({ chain: chains.baseSepolia, transport: http() }),
+    basePub,
     arcPub: createPublicClient({ chain: chains.arcTestnet, transport: http() }),
   };
   return cached;

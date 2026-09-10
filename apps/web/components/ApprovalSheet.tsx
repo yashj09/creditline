@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getGuardianSigner } from "@/lib/ledger";
 
 interface ApprovalData {
@@ -21,8 +21,12 @@ export function ApprovalSheet(props: { planId: string; step: number; onDecision:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signed, setSigned] = useState(false);
+  const fetched = useRef<string | null>(null);
 
   useEffect(() => {
+    const key = `${props.planId}:${props.step}`;
+    if (fetched.current === key) return; // React dev double-invoke / re-render guard: one approval request per step
+    fetched.current = key;
     fetch(`/api/approval?planId=${encodeURIComponent(props.planId)}&step=${props.step}`)
       .then(async (r) => (r.ok ? r.json() : Promise.reject(await r.text())))
       .then((d: ApprovalData) => { setData(d); setStatus("Waiting for your decision."); })
