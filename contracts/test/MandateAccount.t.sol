@@ -139,14 +139,70 @@ contract MandateAccountTest is Test {
         assertEq(usdc.balanceOf(address(acct)), 6_000e6);
     }
 
-    function test_execute_netsOutflowAcrossCallsInStep() public {
-        // borrow 500 then send 90 → net inflow → spent 0
+    function test_execute_measuresGrossOutflow_inflowsDoNotOffset() public {
+        // borrow 500 then send 90 → the 90 is a real outflow and must count, even though the step nets positive
         MandateAccount.Call[] memory c = new MandateAccount.Call[](2);
         c[0] = MandateAccount.Call(address(venue), 0, abi.encodeCall(MockVenue.borrow, (500e6)));
         c[1] = MandateAccount.Call(address(usdc), 0, abi.encodeCall(IERC20.transfer, (recipient, 90e6)));
         vm.prank(agent);
         acct.execute(c, bytes32("p"), 1);
-        assertEq(acct.dailySpent(), 0);
+        assertEq(acct.dailySpent(), 90e6);
+
+        // and an over-cap payment hidden behind a borrow is still rejected
+        c[1] = MandateAccount.Call(address(usdc), 0, abi.encodeCall(IERC20.transfer, (recipient, PER_TX + 1)));
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateAccount.PerTxCapExceeded.selector, PER_TX + 1, PER_TX));
+        acct.execute(c, bytes32("p"), 2);
+    }
+
+    function test_execute_stepCannotRunTwice() public {
+        vm.startPrank(agent);
+        acct.execute(_transfer(recipient, 1e6), bytes32("p"), 1);
+        vm.expectRevert(abi.encodeWithSelector(MandateAccount.StepAlreadyExecuted.selector, bytes32("p"), uint8(1)));
+        acct.execute(_transfer(recipient, 1e6), bytes32("p"), 1);
+        acct.execute(_transfer(recipient, 1e6), bytes32("p"), 2); // next step fine
+        acct.execute(_transfer(recipient, 1e6), bytes32("q"), 1); // other plan fine
+        vm.stopPrank();
+        assertTrue(acct.executed(bytes32("p"), 1));
+        assertFalse(acct.executed(bytes32("p"), 3));
+    }
+
+    function test_guardian_stepCannotRunTwiceEvenWithFreshSignature() public {
+        MandateAccount.Call[] memory c = _transfer(recipient, 200e6);
+        uint64 deadline = uint64(block.timestamp + 10 minutes);
+        bytes memory sig1 = _sign(c, 200e6, bytes32("p"), 1, deadline);
+        vm.prank(agent);
+        acct.executeWithGuardian(c, 200e6, bytes32("p"), 1, deadline, sig1);
+        bytes memory sig2 = _sign(c, 200e6, bytes32("p"), 1, deadline); // new nonce, same step
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateAccount.StepAlreadyExecuted.selector, bytes32("p"), uint8(1)));
+        acct.executeWithGuardian(c, 200e6, bytes32("p"), 1, deadline, sig2);
+    }
+
+    function test_policy_explicitDenyOverridesWildcard() public {
+        // wildcard allows native transfers (guardian); deny one specific recipient
+        address blocked = makeAddr("blocked");
+        vm.deal(address(acct), 1 ether);
+        vm.startPrank(owner);
+        acct.setPolicy(address(0), bytes4(0), true, false); // test-only: wildcard native w/o guardian
+        acct.setPolicy(blocked, bytes4(0), false, false); // explicit deny
+        vm.stopPrank();
+
+        MandateAccount.Call[] memory c = new MandateAccount.Call[](1);
+        c[0] = MandateAccount.Call(blocked, 0.1 ether, "");
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(MandateAccount.CallNotAllowed.selector, blocked, bytes4(0)));
+        acct.execute(c, bytes32("p"), 1);
+
+        c[0] = MandateAccount.Call(recipient, 0.1 ether, ""); // anyone else still allowed via wildcard
+        vm.prank(agent);
+        acct.execute(c, bytes32("p"), 2);
+
+        vm.prank(owner);
+        acct.clearPolicy(blocked, bytes4(0)); // back to wildcard
+        c[0] = MandateAccount.Call(blocked, 0.1 ether, "");
+        vm.prank(agent);
+        acct.execute(c, bytes32("p"), 3);
     }
 
     function test_execute_revertsWhenExpired() public {
@@ -205,8 +261,12 @@ contract MandateAccountTest is Test {
         bytes memory sig = _sign(c, 200e6, bytes32("p"), 1, deadline);
         vm.startPrank(agent);
         acct.executeWithGuardian(c, 200e6, bytes32("p"), 1, deadline, sig);
-        vm.expectRevert(MandateAccount.BadGuardianSignature.selector);
+        // same step: blocked by the per-step guard before any signature work
+        vm.expectRevert(abi.encodeWithSelector(MandateAccount.StepAlreadyExecuted.selector, bytes32("p"), uint8(1)));
         acct.executeWithGuardian(c, 200e6, bytes32("p"), 1, deadline, sig);
+        // different step, old signature: nonce moved → signature no longer recovers to the guardian
+        vm.expectRevert(MandateAccount.BadGuardianSignature.selector);
+        acct.executeWithGuardian(c, 200e6, bytes32("p"), 2, deadline, sig);
         vm.stopPrank();
     }
 

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getGuardianSigner } from "@/lib/ledger";
 
 interface ApprovalData {
@@ -21,12 +21,9 @@ export function ApprovalSheet(props: { planId: string; step: number; onDecision:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signed, setSigned] = useState(false);
-  const fetched = useRef<string | null>(null);
 
   useEffect(() => {
-    const key = `${props.planId}:${props.step}`;
-    if (fetched.current === key) return; // React dev double-invoke / re-render guard: one approval request per step
-    fetched.current = key;
+    // GET is idempotent server-side (cached per plan/step/nonce), so repeated mounts are harmless.
     fetch(`/api/approval?planId=${encodeURIComponent(props.planId)}&step=${props.step}`)
       .then(async (r) => (r.ok ? r.json() : Promise.reject(await r.text())))
       .then((d: ApprovalData) => { setData(d); setStatus("Waiting for your decision."); })
@@ -46,9 +43,9 @@ export function ApprovalSheet(props: { planId: string; step: number; onDecision:
       const res = await fetch("/api/approval", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ planId: props.planId, step: props.step, text: data.text, signature, deadline: data.deadline, nonce: data.nonce, guardian: data.guardian }),
+        body: JSON.stringify({ planId: props.planId, step: props.step, signature }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? "approval rejected");
       setSigned(true);
       setStatus(signer.kind === "ledger" ? "Signed on Ledger. Releasing step to the agent…" : "Signed (dev signer). Releasing step…");
       props.onDecision(true);

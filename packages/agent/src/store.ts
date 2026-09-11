@@ -26,34 +26,38 @@ export const plans = {
   },
 };
 
-export interface StoredApproval {
+/** An approval text built by the server for (plan, step) at a given guardian nonce. Cached so GET is idempotent. */
+export interface PendingApproval {
   planId: string;
   step: number;
-  text: string;
-  signature: `0x${string}`;
-  deadline: string;
-  nonce: string;
+  chainId: number;
   guardian: `0x${string}`;
+  text: string;
+  deadline: string; // unix seconds
+  nonce: string;
+  builtAt: string;
+}
+
+/** A pending approval plus the guardian's signature, verified server-side. */
+export interface StoredApproval extends PendingApproval {
+  signature: `0x${string}`;
   signedAt: string;
 }
 
 const approvalsPath = resolve(DATA_DIR, "approvals.json");
-function readApprovals(): Record<string, StoredApproval> {
-  return existsSync(approvalsPath) ? (JSON.parse(readFileSync(approvalsPath, "utf8")) as Record<string, StoredApproval>) : {};
+interface ApprovalsFile { pending: Record<string, PendingApproval>; signed: Record<string, StoredApproval> }
+function readApprovals(): ApprovalsFile {
+  if (!existsSync(approvalsPath)) return { pending: {}, signed: {} };
+  const raw = JSON.parse(readFileSync(approvalsPath, "utf8"));
+  return raw.pending && raw.signed ? (raw as ApprovalsFile) : { pending: {}, signed: {} }; // ignore pre-refactor shape
 }
+function writeApprovals(f: ApprovalsFile) { writeFileSync(approvalsPath, JSON.stringify(f, null, 2)); }
+
 export const approvals = {
   key: (planId: string, step: number) => `${planId}:${step}`,
-  get(planId: string, step: number): StoredApproval | null {
-    return readApprovals()[this.key(planId, step)] ?? null;
-  },
-  put(a: StoredApproval) {
-    const all = readApprovals();
-    all[this.key(a.planId, a.step)] = a;
-    writeFileSync(approvalsPath, JSON.stringify(all, null, 2));
-  },
-  delete(planId: string, step: number) {
-    const all = readApprovals();
-    delete all[this.key(planId, step)];
-    writeFileSync(approvalsPath, JSON.stringify(all, null, 2));
-  },
+  getPending(planId: string, step: number): PendingApproval | null { return readApprovals().pending[this.key(planId, step)] ?? null; },
+  putPending(a: PendingApproval) { const f = readApprovals(); f.pending[this.key(a.planId, a.step)] = a; writeApprovals(f); },
+  get(planId: string, step: number): StoredApproval | null { return readApprovals().signed[this.key(planId, step)] ?? null; },
+  put(a: StoredApproval) { const f = readApprovals(); f.signed[this.key(a.planId, a.step)] = a; delete f.pending[this.key(a.planId, a.step)]; writeApprovals(f); },
+  delete(planId: string, step: number) { const f = readApprovals(); delete f.signed[this.key(planId, step)]; delete f.pending[this.key(planId, step)]; writeApprovals(f); },
 };

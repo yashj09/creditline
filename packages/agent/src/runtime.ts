@@ -13,8 +13,8 @@ export interface Runtime {
   base: Deployment;
   arc: Deployment;
   account: Address;
-  /** Live on-chain guardian (the contract is the source of truth; .env is only a hint at deploy time). */
-  guardian: () => Promise<Address>;
+  /** Live on-chain guardian for the account on a given chain (the contract is the source of truth). */
+  guardian: (chainId?: number) => Promise<Address>;
   agent: Address;
   wallet: AgentWallet;
   basePub: PublicClient;
@@ -45,15 +45,24 @@ export async function getRuntime(): Promise<Runtime> {
     : new LocalAgentWallet(requireEnv("AGENT_PRIVATE_KEY") as Hex, chainMap);
 
   const basePub = createPublicClient({ chain: chains.baseSepolia, transport: http() });
+  const arcPub = createPublicClient({ chain: chains.arcTestnet, transport: http() });
+  const guardian = (chainId?: number) =>
+    (chainId === chains.arcTestnet.id ? arcPub : basePub).readContract({ address: base.account, abi: MandateAccountAbi, functionName: "guardian" });
+  // The guardian is per-contract storage. A split configuration would make Arc approvals fail after the user has
+  // already tapped the device, so refuse to run until the owner aligns both chains.
+  const [gBase, gArc] = await Promise.all([guardian(chains.baseSepolia.id), guardian(chains.arcTestnet.id)]);
+  if (gBase.toLowerCase() !== gArc.toLowerCase()) {
+    throw new Error(`Guardian differs across chains (Base ${gBase}, Arc ${gArc}). Run setGuardian on both chains with the same address.`);
+  }
   cached = {
     base,
     arc,
     account: base.account,
-    guardian: () => basePub.readContract({ address: base.account, abi: MandateAccountAbi, functionName: "guardian" }),
+    guardian,
     agent: await wallet.address(chains.baseSepolia.id),
     wallet,
     basePub,
-    arcPub: createPublicClient({ chain: chains.arcTestnet, transport: http() }),
+    arcPub,
   };
   return cached;
 }

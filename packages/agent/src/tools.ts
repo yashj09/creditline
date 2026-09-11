@@ -14,6 +14,8 @@ import {
   encodeExecuteWithGuardian,
   encodeReceiveMessage,
   encodeScheduleRepayment,
+  isMessageReceived,
+  usdcCreditedInReceipt,
   explorerTx,
   fetchMarkets,
   planIdToBytes32,
@@ -26,10 +28,49 @@ import {
   type Plan,
   type Step,
 } from "@mandate/core";
-import { getRuntime } from "./runtime.ts";
+import { getRuntime, type Runtime } from "./runtime.ts";
 import { approvals, audit, plans } from "./store.ts";
 
 const fmtUsdc = (v: bigint) => Number(formatUnits(v, 6)).toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+/** Single definition of "this step no longer needs to run". */
+export const isDone = (s: Step) => s.status === "done" || s.status === "skipped";
+
+/**
+ * Asks the chain whether a step has already taken effect, so a retry after a crash never re-sends.
+ *  - mandate steps: the account's per-(plan, step) `executed` flag
+ *  - CCTP relay:    the destination transmitter's usedNonces for the attested message
+ *  - schedule / mark_repaid: the repayment list on the Arc account
+ */
+async function alreadyExecutedOnChain(rt: Runtime, plan: Plan, step: Step, attestationMessage?: Hex): Promise<boolean> {
+  const pub = step.chainId === 84532 ? rt.basePub : rt.arcPub;
+  if (step.calls.length > 0) {
+    return pub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "executed", args: [planIdToBytes32(plan.id), step.index] });
+  }
+  if (step.kind === "bridge_relay") return attestationMessage ? isMessageReceived(pub, attestationMessage) : false;
+  if (step.kind === "mark_repaid" && plan.intent.kind === "repay" && plan.intent.repaymentId !== undefined) {
+    const [, , , done] = await rt.arcPub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "repayments", args: [BigInt(plan.intent.repaymentId)] });
+    return done;
+  }
+  if (step.kind === "schedule_repayment" && plan.intent.kind === "liquidity") {
+    // a matching intent created after the plan was drafted counts as done
+    const n = await rt.arcPub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "repaymentCount" });
+    const amount = BigInt(Math.round(plan.intent.amountUsdc * 1e6));
+    const earliest = Math.floor(new Date(plan.createdAt).getTime() / 1000) + plan.intent.repayInDays * 86400 - 3600;
+    for (let i = n; i > 0n; i--) {
+      const [dueAt, amt] = await rt.arcPub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "repayments", args: [i - 1n] });
+      if (amt === amount && Number(dueAt) >= earliest) return true;
+      if (Number(dueAt) < earliest) break;
+    }
+  }
+  return false;
+}
+
+function markDone(plan: Plan, step: Step, txHash: Hex | undefined, chainId: number, summary: string) {
+  step.status = "done";
+  if (txHash) { step.txHash = txHash; step.explorer = explorerTx(chainId === 84532 ? chains.baseSepolia : chains.arcTestnet, txHash); }
+  plans.save(plan);
+}
 
 export const tools = {
   get_positions: tool({
@@ -154,23 +195,31 @@ export const tools = {
       const results = [];
       let priorDone = true;
       for (const step of plan.steps) {
-        if (step.status === "done") { results.push({ step: step.index, title: step.title, ok: true, notes: ["already executed"] }); continue; }
+        // a step stuck in `executing` after a crash: ask the chain, never guess
+        if (step.status === "executing" && (await alreadyExecutedOnChain(rt, plan, step))) markDone(plan, step, step.txHash as Hex | undefined, step.chainId, step.title);
+        if (isDone(step)) { results.push({ step: step.index, title: step.title, ok: true, notes: ["already executed"] }); continue; }
         const pub = step.chainId === 84532 ? rt.basePub : rt.arcPub;
         const sim = await simulateStep(pub, step, { account: rt.account, agent: rt.agent, owner: rt.base.owner, planId: planIdToBytes32(plan.id), priorStepsDone: priorDone });
         step.simulation = sim;
-        if (step.status !== "executing" && step.status !== "awaiting_guardian") step.status = sim.ok ? "simulated" : "failed";
-        results.push({ step: step.index, title: step.title, ok: sim.ok, deferred: sim.deferred, revertReason: sim.revertReason, notes: sim.notes });
-        priorDone = false; // only the first not-yet-executed step gets a dynamic simulation
+        if (step.status !== "awaiting_guardian") step.status = sim.ok ? "simulated" : "failed";
+        results.push({ step: step.index, title: step.title, ok: sim.ok, deferred: sim.deferred ?? false, revertReason: sim.revertReason, notes: sim.notes });
+        priorDone = false; // only the first not-yet-executed step can be simulated against real state
       }
       plans.save(plan);
-      audit.write({ planId, step: 0, kind: "simulate", summary: `Simulation: ${results.filter((r) => r.ok).length}/${results.length} steps ok` });
-      return { planId, results };
+      const dynamicOk = results.filter((r) => r.ok && !("deferred" in r && r.deferred)).length;
+      const deferred = results.filter((r) => "deferred" in r && r.deferred).length;
+      const failed = results.filter((r) => !r.ok).length;
+      audit.write({ planId, step: 0, kind: "simulate", summary: `Simulation: ${dynamicOk} verified, ${deferred} checked statically (depend on earlier steps), ${failed} failing` });
+      return {
+        planId, results, verified: dynamicOk, deferred, failed,
+        note: deferred > 0 ? "Deferred steps passed only the allow-list check; execute_step re-simulates each step against live state right before running it." : undefined,
+      };
     },
   }),
 
   execute_step: tool({
     description:
-      "Execute one plan step in order. Steps flagged requiresGuardian pause for the user's Ledger approval before running; the signature is attached automatically once the user has signed. Returns the transaction hash and explorer link.",
+      "Execute one plan step in order. Re-simulates the step against live state first. Steps flagged requiresGuardian pause for the user's Ledger approval; the signature is attached automatically once the user has signed. Safe to retry: the chain is checked before anything is re-sent. Returns the transaction hash and explorer link.",
     inputSchema: z.object({ planId: z.string(), step: z.number().int().min(1) }),
     execute: async ({ planId, step: idx }) => {
       const rt = await getRuntime();
@@ -179,35 +228,56 @@ export const tools = {
       const step = plan.steps.find((s) => s.index === idx);
       if (!step) return { error: `plan ${planId} has no step ${idx}` };
       const prev = plan.steps.find((s) => s.index === idx - 1);
-      if (prev && prev.status !== "done") return { error: `step ${idx - 1} must complete first (status: ${prev.status})` };
-      if (step.status === "done") return { ok: true, alreadyDone: true, txHash: step.txHash, explorer: step.explorer };
+      if (prev && !isDone(prev)) return { error: `step ${idx - 1} must complete first (status: ${prev.status})` };
+      if (isDone(step)) return { ok: true, alreadyDone: true, step: idx, txHash: step.txHash, explorer: step.explorer };
 
       const chain = step.chainId === 84532 ? chains.baseSepolia : chains.arcTestnet;
+      const pub = step.chainId === 84532 ? rt.basePub : rt.arcPub;
       const planIdHex = planIdToBytes32(plan.id);
+
+      // ---- idempotency: did a previous attempt already land? -------------------------------------------------
+      let attestation: Awaited<ReturnType<typeof waitForAttestation>> | undefined;
+      if (step.kind === "bridge_relay") {
+        const burn = plan.steps.find((s) => s.kind === "bridge_burn" && s.index < step.index);
+        if (!burn?.txHash) return { ok: false, step: idx, error: "bridge burn tx missing" };
+        const srcDomain = burn.chainId === 84532 ? BASE_SEPOLIA.domain : ARC_TESTNET.domain;
+        attestation = await waitForAttestation(srcDomain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
+      }
+      if (await alreadyExecutedOnChain(rt, plan, step, attestation?.message)) {
+        markDone(plan, step, step.txHash as Hex | undefined, chain.id, step.title);
+        audit.write({ planId, step: idx, kind: "info", chainId: chain.id, summary: `Step ${idx} was already executed on-chain; marked done without re-sending` });
+        return { ok: true, alreadyDone: true, step: idx, txHash: step.txHash, explorer: step.explorer };
+      }
+
+      // ---- re-simulate against live state (deferred simulations are only static) ---------------------------------
+      if (step.calls.length > 0) {
+        const sim = await simulateStep(pub, step, { account: rt.account, agent: rt.agent, owner: rt.base.owner, planId: planIdHex, priorStepsDone: true });
+        step.simulation = sim;
+        if (!sim.ok) { step.status = "failed"; plans.save(plan); audit.write({ planId, step: idx, kind: "error", chainId: chain.id, summary: `Pre-flight simulation failed: ${sim.revertReason}` }); return { ok: false, step: idx, error: `simulation failed: ${sim.revertReason}` }; }
+      }
+
+      // ---- guardian signature (fresh, for this nonce) --------------------------------------------------------------
+      let approval = step.requiresGuardian ? approvals.get(plan.id, step.index) : null;
+      if (step.requiresGuardian) {
+        if (approval) {
+          const liveNonce = await pub.readContract({ address: rt.account, abi: MandateAccountAbi, functionName: "guardianNonce" });
+          const stale = approval.nonce !== liveNonce.toString() || Number(approval.deadline) <= Math.floor(Date.now() / 1000) + 30;
+          if (stale) { approvals.delete(plan.id, step.index); approval = null; audit.write({ planId, step: idx, kind: "info", chainId: chain.id, summary: "Stored guardian approval was stale (nonce moved or deadline passed); a fresh approval is required" }); }
+        }
+        if (!approval) { step.status = "awaiting_guardian"; plans.save(plan); return { ok: false, step: idx, awaitingGuardian: true, error: "Guardian signature missing or stale. The user must approve this step on their Ledger first." }; }
+      }
+
+      // ---- send ----------------------------------------------------------------------------------------------------
       step.status = "executing";
       plans.save(plan);
+      let txHash: Hex;
+      let summary = step.title;
       try {
-        let txHash: Hex;
-        let summary = step.title;
         if (step.kind === "bridge_relay") {
-          const burn = plan.steps.find((s) => s.kind === "bridge_burn" && s.index < step.index);
-          if (!burn?.txHash) throw new Error("bridge burn tx missing");
-          const srcDomain = burn.chainId === 84532 ? BASE_SEPOLIA.domain : ARC_TESTNET.domain;
-          const dstPub = step.chainId === 84532 ? rt.basePub : rt.arcPub;
-          const dstUsdc = step.chainId === 84532 ? BASE_SEPOLIA.usdc : ARC_TESTNET.usdc;
-          const att = await waitForAttestation(srcDomain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
-          const before = await usdcBalance(dstPub, dstUsdc, rt.account);
-          txHash = await rt.wallet.send({ chainId: chain.id, to: CCTP.messageTransmitterV2, data: encodeReceiveMessage(att) });
-          let after = before;
-          for (let i = 0; i < 6 && after <= before; i++) { // public RPCs can lag the receipt by a few seconds
-            await new Promise((r) => setTimeout(r, 2_500));
-            after = await usdcBalance(dstPub, dstUsdc, rt.account);
-          }
-          summary = `Minted ${fmtUsdc(after - before)} USDC on ${chain.name}`;
+          txHash = await rt.wallet.send({ chainId: chain.id, to: CCTP.messageTransmitterV2, data: encodeReceiveMessage(attestation!) });
         } else if (step.kind === "mark_repaid") {
           if (!step.direct) throw new Error("mark_repaid step missing calldata");
           txHash = await rt.wallet.send({ chainId: chain.id, to: step.direct.to as Address, data: step.direct.data as Hex });
-          summary = step.title;
         } else if (step.kind === "schedule_repayment") {
           if (plan.intent.kind !== "liquidity") throw new Error("schedule_repayment only applies to liquidity plans");
           const dueAt = BigInt(Math.floor(Date.now() / 1000) + plan.intent.repayInDays * 86400);
@@ -216,36 +286,45 @@ export const tools = {
           summary = `Repayment of ${plan.intent.amountUsdc} USDC scheduled for ${new Date(Number(dueAt) * 1000).toDateString()}`;
         } else {
           const calls = step.calls.map((c) => ({ target: c.target as Address, value: BigInt(c.value), data: c.data as Hex }));
-          if (step.requiresGuardian) {
-            const a = approvals.get(plan.id, step.index);
-            if (!a) {
-              step.status = "awaiting_guardian";
-              plans.save(plan);
-              return { error: "Guardian signature missing. The user must approve this step on their Ledger first." };
-            }
-            txHash = await rt.wallet.send({
-              chainId: chain.id, to: rt.account,
-              data: encodeExecuteWithGuardian(calls, BigInt(step.maxUsdcOut), planIdHex, step.index, BigInt(a.deadline), a.signature),
-            });
-            approvals.delete(plan.id, step.index);
-          } else {
-            txHash = await rt.wallet.send({ chainId: chain.id, to: rt.account, data: encodeExecute(calls, planIdHex, step.index) });
-          }
+          txHash = approval
+            ? await rt.wallet.send({ chainId: chain.id, to: rt.account, data: encodeExecuteWithGuardian(calls, BigInt(step.maxUsdcOut), planIdHex, step.index, BigInt(approval.deadline), approval.signature) })
+            : await rt.wallet.send({ chainId: chain.id, to: rt.account, data: encodeExecute(calls, planIdHex, step.index) });
+          if (approval) approvals.delete(plan.id, step.index);
         }
-        step.status = "done";
-        step.txHash = txHash;
-        step.explorer = explorerTx(chain, txHash);
-        plans.save(plan);
-        audit.write({ planId, step: idx, kind: "execute", chainId: chain.id, txHash, explorer: step.explorer, summary });
-        const extra = step.kind === "supply_borrow" ? await readCometPosition(rt.basePub, rt.account).then((p) => ({ healthFactor: p.healthFactor.toFixed(2), liquidationPriceUsd: p.liquidationPriceUsd })) : {};
-        return { ok: true, step: idx, title: step.title, txHash, explorer: step.explorer, summary, ...extra };
       } catch (e) {
+        const msg = (e as Error).message;
+        // the send failed — but did an earlier attempt land in the meantime? ask the chain before reporting failure
+        if (await alreadyExecutedOnChain(rt, plan, step, attestation?.message)) {
+          markDone(plan, step, undefined, chain.id, step.title);
+          return { ok: true, alreadyDone: true, step: idx, note: "a previous attempt had already executed this step" };
+        }
+        if (approval && /BadGuardianSignature|ApprovalExpired/.test(msg)) approvals.delete(plan.id, step.index);
         step.status = "failed";
         plans.save(plan);
-        const msg = (e as Error).message;
-        audit.write({ planId, step: idx, kind: "error", summary: msg });
+        audit.write({ planId, step: idx, kind: "error", chainId: chain.id, summary: msg });
         return { ok: false, step: idx, error: msg };
       }
+
+      // ---- success: persist first, then best-effort enrichment that can never flip the status ----------------------
+      markDone(plan, step, txHash, chain.id, summary);
+      const extra: Record<string, unknown> = {};
+      try {
+        if (step.kind === "bridge_relay") {
+          const receipt = await pub.getTransactionReceipt({ hash: txHash });
+          const minted = usdcCreditedInReceipt(receipt, rt.account, step.chainId === 84532 ? BASE_SEPOLIA.usdc : ARC_TESTNET.usdc);
+          summary = minted > 0n ? `Minted ${fmtUsdc(minted)} USDC on ${chain.name}` : `receiveMessage confirmed on ${chain.name} (mint amount not visible in logs)`;
+        }
+        if (step.kind === "supply_borrow" || step.kind === "repay") {
+          const p = await readCometPosition(rt.basePub, rt.account);
+          extra.healthFactor = Number.isFinite(p.healthFactor) ? p.healthFactor.toFixed(2) : "∞";
+          extra.liquidationPriceUsd = p.liquidationPriceUsd;
+          extra.debtUsdc = fmtUsdc(p.debtUsdc);
+        }
+      } catch (e) {
+        extra.note = `executed; post-execution read failed: ${(e as Error).message}`;
+      }
+      try { audit.write({ planId, step: idx, kind: "execute", chainId: chain.id, txHash, explorer: step.explorer, summary, data: extra }); } catch { /* never fail a landed step on logging */ }
+      return { ok: true, step: idx, title: step.title, txHash, explorer: step.explorer, summary, ...extra };
     },
   }),
 

@@ -44,7 +44,9 @@ contract MandateAccount is ReentrancyGuard {
         uint64 expiry;
     }
 
+    /// @dev `set` distinguishes an explicit entry (allow or deny) from an unset one that falls back to the wildcard.
     struct Policy {
+        bool set;
         bool allowed;
         bool requiresGuardian;
     }
@@ -83,6 +85,9 @@ contract MandateAccount is ReentrancyGuard {
     uint128 public dailySpent;
     uint256 public guardianNonce;
 
+    /// @notice A (plan, step) pair executes at most once, so a retry after a crash cannot double-spend.
+    mapping(bytes32 planId => mapping(uint8 step => bool)) public executed;
+
     Repayment[] public repayments;
 
     // ---------------------------------------------------------------------------------------------
@@ -93,6 +98,7 @@ contract MandateAccount is ReentrancyGuard {
     event GuardianApproved(bytes32 indexed planId, uint8 indexed step, address guardian, uint256 nonce);
     event MandateUpdated(uint128 perTxCap, uint128 dailyCap, uint64 expiry);
     event PolicyUpdated(address indexed target, bytes4 indexed selector, bool allowed, bool requiresGuardian);
+    event PolicyCleared(address indexed target, bytes4 indexed selector);
     event AgentUpdated(address agent);
     event GuardianUpdated(address guardian);
     event OwnerUpdated(address owner);
@@ -115,6 +121,7 @@ contract MandateAccount is ReentrancyGuard {
     error ZeroAddress();
     error NoGuardian();
     error InvalidRepayment();
+    error StepAlreadyExecuted(bytes32 planId, uint8 step);
 
     // ---------------------------------------------------------------------------------------------
     // Setup
@@ -151,6 +158,7 @@ contract MandateAccount is ReentrancyGuard {
     ///         if the measured USDC outflow breaks the per-tx or daily cap.
     function execute(Call[] calldata calls, bytes32 planId, uint8 step) external onlyAgent nonReentrant {
         Mandate memory m = _activeMandate();
+        _markExecuted(planId, step);
         _checkAllowed(calls, true);
 
         uint256 spent = _runMeasured(calls);
@@ -176,6 +184,7 @@ contract MandateAccount is ReentrancyGuard {
         bytes calldata signature
     ) external onlyAgent nonReentrant {
         _activeMandate();
+        _markExecuted(planId, step);
         _checkAllowed(calls, false);
 
         bytes32 callsHash = keccak256(abi.encode(calls));
@@ -251,6 +260,12 @@ contract MandateAccount is ReentrancyGuard {
         _setPolicy(target, selector, allowed, requiresGuardian);
     }
 
+    /// @notice Remove an explicit entry so the (target, selector) falls back to the wildcard rule.
+    function clearPolicy(address target, bytes4 selector) external onlyOwner {
+        delete policies[target][selector];
+        emit PolicyCleared(target, selector);
+    }
+
     function setPolicies(PolicyInput[] calldata inputs) external onlyOwner {
         for (uint256 i; i < inputs.length; ++i) {
             _setPolicy(inputs[i].target, inputs[i].selector, inputs[i].allowed, inputs[i].requiresGuardian);
@@ -302,7 +317,7 @@ contract MandateAccount is ReentrancyGuard {
 
     function policyFor(address target, bytes4 selector) external view returns (Policy memory) {
         Policy memory p = policies[target][selector];
-        if (!p.allowed) p = policies[address(0)][selector];
+        if (!p.set) p = policies[address(0)][selector];
         return p;
     }
 
@@ -346,23 +361,21 @@ contract MandateAccount is ReentrancyGuard {
         emit GuardianApproved(planId, step, signer, nonce);
     }
 
-    /// @dev Runs the calls and returns the measured USDC outflow (0 if the balance grew).
-    function _runMeasured(Call[] calldata calls) internal returns (uint256 spent) {
-        uint256 before = _usdcBalance();
-        _run(calls);
-        uint256 after_ = _usdcBalance();
-        spent = after_ >= before ? 0 : before - after_;
-    }
-
     function _setPolicy(address target, bytes4 selector, bool allowed, bool requiresGuardian) internal {
-        policies[target][selector] = Policy({allowed: allowed, requiresGuardian: requiresGuardian});
+        policies[target][selector] = Policy({set: true, allowed: allowed, requiresGuardian: requiresGuardian});
         emit PolicyUpdated(target, selector, allowed, requiresGuardian);
     }
 
+    /// @dev Specific entry wins when set — including an explicit deny — otherwise the wildcard (address(0)) applies.
     function _policyFor(Call calldata c) internal view returns (Policy memory p) {
         bytes4 sel = _selector(c.data);
         p = policies[c.target][sel];
-        if (!p.allowed) p = policies[address(0)][sel];
+        if (!p.set) p = policies[address(0)][sel];
+    }
+
+    function _markExecuted(bytes32 planId, uint8 step) internal {
+        if (executed[planId][step]) revert StepAlreadyExecuted(planId, step);
+        executed[planId][step] = true;
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4) {
@@ -373,6 +386,20 @@ contract MandateAccount is ReentrancyGuard {
         for (uint256 i; i < calls.length; ++i) {
             (bool ok, bytes memory ret) = calls[i].target.call{value: calls[i].value}(calls[i].data);
             if (!ok) revert CallFailed(i, ret);
+        }
+    }
+
+    /// @dev Runs the calls and returns the *gross* USDC outflow: the sum of balance decreases measured after each
+    ///      individual call. Inflows (a borrow) never offset outflows (a payment) inside the same step, so the caps
+    ///      bound what actually leaves the account.
+    function _runMeasured(Call[] calldata calls) internal returns (uint256 spent) {
+        uint256 bal = _usdcBalance();
+        for (uint256 i; i < calls.length; ++i) {
+            (bool ok, bytes memory ret) = calls[i].target.call{value: calls[i].value}(calls[i].data);
+            if (!ok) revert CallFailed(i, ret);
+            uint256 after_ = _usdcBalance();
+            if (after_ < bal) spent += bal - after_;
+            bal = after_;
         }
     }
 

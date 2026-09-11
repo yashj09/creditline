@@ -78,8 +78,14 @@ export function SimulationCard({ data }: { data: any }) {
     <div className="panel my-2 p-3 text-sm">
       <div className="mb-1 text-xs font-semibold uppercase tracking-wide muted">Simulation</div>
       {data.results.map((r: any) => (
-        <div key={r.step} className="flex gap-2"><span style={{ color: r.ok ? "var(--ok)" : "var(--bad)" }}>{r.ok ? "✓" : "✗"}</span><span>{r.step}. {r.title}</span>{r.revertReason && <span className="mono muted text-xs">{r.revertReason}</span>}</div>
+        <div key={r.step} className="flex flex-wrap items-center gap-2">
+          <span style={{ color: !r.ok ? "var(--bad)" : r.deferred ? "var(--muted)" : "var(--ok)" }}>{!r.ok ? "✗" : r.deferred ? "◦" : "✓"}</span>
+          <span>{r.step}. {r.title}</span>
+          {r.deferred && <span className="pill" style={{ border: "1px solid var(--border)", color: "var(--muted)" }}>allow-list checked · re-simulated before execution</span>}
+          {r.revertReason && <span className="mono muted text-xs">{r.revertReason}</span>}
+        </div>
       ))}
+      {typeof data.verified === "number" && <div className="muted mt-2 text-xs">{data.verified} verified against live state · {data.deferred} depend on earlier steps · {data.failed} failing</div>}
     </div>
   );
 }

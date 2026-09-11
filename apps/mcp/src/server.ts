@@ -20,7 +20,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import type { Hex } from "viem";
 import { IntentSchema, RepayIntentSchema } from "@mandate/core";
-import { SYSTEM_PROMPT, approvals, audit, buildApproval, plans, tools, verifyApproval } from "@mandate/agent";
+import { SYSTEM_PROMPT, acceptGuardianSignature, getOrBuildApproval, plans, tools } from "@mandate/agent";
 
 const server = new McpServer({ name: "mandate", version: "0.1.0" }, { instructions: SYSTEM_PROMPT });
 
@@ -50,27 +50,28 @@ server.registerTool(
     const s = plan?.steps.find((x) => x.index === step);
     if (!plan || !s) return json({ error: "unknown plan/step" });
     if (!s.requiresGuardian) return json(await run(tools.execute_step, { planId, step }));
-    const a = await buildApproval(plan, s);
-    audit.write({ planId, step, kind: "guardian-request", chainId: s.chainId, summary: `Guardian approval requested via MCP: ${s.title}`, data: { text: a.text } });
-    return json({ requiresGuardian: true, step: { index: s.index, title: s.title, description: s.description }, approval: a, next: "Have the guardian sign `approval.text` with personal_sign (Ledger clear-signs it), then call submit_guardian_signature." });
+    const a = await getOrBuildApproval(plan, s);
+    return json({ requiresGuardian: true, step: { index: s.index, title: s.title, description: s.description }, approval: { text: a.text, guardian: a.guardian, chainId: a.chainId, deadline: a.deadline, nonce: a.nonce }, next: "Have the guardian sign `approval.text` with personal_sign (a Ledger clear-signs it), then call submit_guardian_signature with only the signature." });
   },
 );
 
 server.registerTool(
   "submit_guardian_signature",
   {
-    description: "Store the guardian's EIP-191 signature over the approval text returned by prepare_step.",
-    inputSchema: { planId: z.string(), step: z.number().int().min(1), text: z.string(), signature: z.string(), deadline: z.string(), nonce: z.string(), guardian: z.string() },
+    description: "Submit the guardian's EIP-191 signature over the approval text returned by prepare_step. The server verifies it against its own copy of the text and the on-chain guardian.",
+    inputSchema: { planId: z.string(), step: z.number().int().min(1), signature: z.string() },
   },
   async (a) => {
     const plan = plans.get(a.planId);
     const s = plan?.steps.find((x) => x.index === a.step);
     if (!plan || !s) return json({ error: "unknown plan/step" });
-    const ok = await verifyApproval(a.guardian as Hex, a.text, a.signature as Hex);
-    if (!ok) return json({ error: "signature does not recover to the guardian" });
-    approvals.put({ ...a, signature: a.signature as Hex, guardian: a.guardian as Hex, signedAt: new Date().toISOString() });
-    audit.write({ planId: a.planId, step: a.step, kind: "guardian-approved", chainId: s.chainId, summary: `Guardian ${a.guardian} signed step ${a.step} (via MCP)` });
-    return json({ ok: true, next: "call execute_step" });
+    try {
+      await acceptGuardianSignature(plan, s, a.signature as Hex, "mcp");
+      plans.save(plan);
+      return json({ ok: true, next: "call execute_step" });
+    } catch (e) {
+      return json({ error: (e as Error).message });
+    }
   },
 );
 

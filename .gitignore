@@ -12,3 +12,5 @@ contracts/broadcast/**/dry-run/
 *.enc.bak
 .data/
 apps/web/next-env.d.ts
+/contracts/broadcast
+/docs
