@@ -92,6 +92,41 @@ export function encodeReceiveMessage(a: Attestation): Hex {
   });
 }
 
+/** CCTP v2 message layout: version(4) | sourceDomain(4) | destinationDomain(4) | nonce(32) | … */
+export function messageNonce(message: Hex): Hex {
+  return `0x${message.slice(2 + 24, 2 + 24 + 64)}` as Hex;
+}
+
+/** True once the destination MessageTransmitter has consumed this message (i.e. the mint already happened). */
+export async function isMessageReceived(client: PublicClient, message: Hex): Promise<boolean> {
+  const used = await client.readContract({ address: CCTP.messageTransmitterV2, abi: messageTransmitterV2Abi, functionName: "usedNonces", args: [messageNonce(message)] });
+  return used !== 0n;
+}
+
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ARC_NATIVE_LOG_EMITTER = "0xfffffffffffffffffffffffffffffffffffffffe";
+
+/**
+ * USDC credited to `account` in this receipt, in 6-dec units, read from Transfer logs rather than from a balance
+ * re-read (public RPCs lag). On Arc the native-USDC emitter logs 18-dec values; the ERC-20 view logs 6-dec.
+ */
+export function usdcCreditedInReceipt(receipt: TransactionReceipt, account: Address, usdc: Address): bigint {
+  // On Arc a single native-USDC credit is logged twice: by the ERC-20 view (6-dec) and by the native emitter (18-dec).
+  // Count the ERC-20 view when present and fall back to the native emitter only when it is not.
+  let erc20 = 0n;
+  let native = 0n;
+  const acct = account.toLowerCase().replace("0x", "").padStart(64, "0");
+  for (const log of receipt.logs) {
+    if (log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC || log.topics.length < 3) continue;
+    if ((log.topics[2] as string).toLowerCase().replace("0x", "") !== acct) continue;
+    const value = BigInt(log.data);
+    const emitter = log.address.toLowerCase();
+    if (emitter === usdc.toLowerCase()) erc20 += value;
+    else if (emitter === ARC_NATIVE_LOG_EMITTER) native += value / 1_000_000_000_000n;
+  }
+  return erc20 > 0n ? erc20 : native;
+}
+
 /** Extracts the DepositForBurn event (sanity check that the burn happened) from a receipt. */
 export function findBurnEvent(receipt: TransactionReceipt) {
   for (const log of receipt.logs) {

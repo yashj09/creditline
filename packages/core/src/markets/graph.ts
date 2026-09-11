@@ -15,11 +15,9 @@ export const MESSARI_LENDING_SUBGRAPHS: Array<{
 }> = [
   { venueId: "aave-v3-ethereum", protocol: "aave-v3", network: "ethereum", chainId: 1, subgraphId: "JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk" },
   { venueId: "aave-v3-base", protocol: "aave-v3", network: "base", chainId: 8453, subgraphId: "D7mapexM5ZsQckLJai2FawTKXJ7CqYGKM8PErnS3cJi9" },
-  {
-    venueId: "aave-v3-arbitrum", protocol: "aave-v3", network: "arbitrum", chainId: 42161,
-    subgraphId: "4xyasjQeREe7PxnF6wVdobZvCw5mhoHZq3T7guRpuNPf",
-    executable: { chainId: 421614, network: "arbitrum-sepolia", note: "Aave v3 Arbitrum Sepolia lends real Circle USDC (CCTP domain 3)" },
-  },
+  // Aave v3 Arbitrum Sepolia lends real Circle USDC (CCTP domain 3) and is the natural second executor, but no executor
+  // is implemented yet — so it is deliberately NOT tagged `executable`. Tag it only when core/exec/aave.ts lands.
+  { venueId: "aave-v3-arbitrum", protocol: "aave-v3", network: "arbitrum", chainId: 42161, subgraphId: "4xyasjQeREe7PxnF6wVdobZvCw5mhoHZq3T7guRpuNPf" },
   { venueId: "compound-v3-ethereum", protocol: "compound-v3", network: "ethereum", chainId: 1, subgraphId: "AwoxEZbiWLvv6e3QdvdMZw4WDURdGbvPfHmZRc8Dpfz9" },
   { venueId: "compound-v3-arbitrum", protocol: "compound-v3", network: "arbitrum", chainId: 42161, subgraphId: "5MjRndNWGhqvNX7chUYLQDnvEgc8DaH8eisEkcJt71SR" },
   { venueId: "spark-ethereum", protocol: "spark", network: "ethereum", chainId: 1, subgraphId: "GbKdmBe4ycCYCQLQSjqGg6UHYoYfbyJyq5WrG35pv1si" },

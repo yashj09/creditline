@@ -2,7 +2,13 @@
 export const MandateFactoryAbi = [
   {
     "type": "constructor",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "admin_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {

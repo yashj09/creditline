@@ -39,7 +39,7 @@ export const StepSchema = z.object({
   status: z.enum(["pending", "simulated", "awaiting_guardian", "executing", "done", "failed", "skipped"]).default("pending"),
   txHash: z.string().optional(),
   explorer: z.string().optional(),
-  simulation: z.object({ ok: z.boolean(), revertReason: z.string().optional(), notes: z.array(z.string()) }).optional(),
+  simulation: z.object({ ok: z.boolean(), deferred: z.boolean().optional(), revertReason: z.string().optional(), notes: z.array(z.string()) }).optional(),
 });
 export type Step = z.infer<typeof StepSchema>;
 

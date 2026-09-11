@@ -110,6 +110,24 @@ export const MandateAccountAbi = [
   },
   {
     "type": "function",
+    "name": "clearPolicy",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "dailyRemaining",
     "inputs": [],
     "outputs": [
@@ -228,6 +246,30 @@ export const MandateAccountAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "executed",
+    "inputs": [
+      {
+        "name": "planId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "step",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -351,6 +393,11 @@ export const MandateAccountAbi = [
     ],
     "outputs": [
       {
+        "name": "set",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
         "name": "allowed",
         "type": "bool",
         "internalType": "bool"
@@ -384,6 +431,11 @@ export const MandateAccountAbi = [
         "type": "tuple",
         "internalType": "struct MandateAccount.Policy",
         "components": [
+          {
+            "name": "set",
+            "type": "bool",
+            "internalType": "bool"
+          },
           {
             "name": "allowed",
             "type": "bool",
@@ -758,6 +810,25 @@ export const MandateAccountAbi = [
   },
   {
     "type": "event",
+    "name": "PolicyCleared",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "indexed": true,
+        "internalType": "bytes4"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "PolicyUpdated",
     "inputs": [
       {
@@ -1022,6 +1093,22 @@ export const MandateAccountAbi = [
         "name": "token",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StepAlreadyExecuted",
+    "inputs": [
+      {
+        "name": "planId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "step",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ]
   },

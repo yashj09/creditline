@@ -38,7 +38,7 @@ export async function simulateStep(
   ctx: { account: Address; agent: Address; owner: Address; planId: Hex; priorStepsDone: boolean },
 ): Promise<StepSimulation> {
   const notes: string[] = [];
-  if (step.calls.length === 0) return { ok: true, notes: ["direct agent transaction; simulated at execution time"] };
+  if (step.calls.length === 0) return { ok: true, deferred: true, notes: ["direct agent transaction (relay / repayment record); verified against the chain at execution time"] };
   const calls = step.calls.map((c) => ({ target: c.target as Address, value: BigInt(c.value), data: c.data as Hex }));
 
   // static: policy

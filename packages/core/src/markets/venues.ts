@@ -82,6 +82,9 @@ export async function fetchMarkets(opts: FetchMarketsOptions): Promise<MarketsSn
   return { fetchedAt: new Date().toISOString(), rates, warnings };
 }
 
+/** Chains for which core/exec has a working executor. Keep in sync with plan/build.ts. */
+export const IMPLEMENTED_EXECUTOR_CHAINS = new Set<number>([84532]);
+
 export interface Ranked {
   cheapestMainnet: VenueRate | undefined;
   /** Cheapest venue that Mandate can execute on today. */
@@ -95,8 +98,8 @@ export function rankVenues(snapshot: MarketsSnapshot, amountUsd: number): Ranked
   const eligible = snapshot.rates.filter((r) => r.availableUsd >= amountUsd && r.borrowAprPct > 0);
   const table = [...eligible].sort((a, b) => a.borrowAprPct - b.borrowAprPct);
   const cheapestMainnet = table.find((r) => !r.network.includes("sepolia"));
-  // Prefer a mainnet-observed venue that has an executable twin; else the live testnet twin.
-  const withTwin = table.filter((r) => r.executable);
+  // Only venues whose twin has an implemented executor may be recommended; the plan builder relies on this invariant.
+  const withTwin = table.filter((r) => r.executable && IMPLEMENTED_EXECUTOR_CHAINS.has(r.executable.chainId));
   const recommended = withTwin[0];
   const parts: string[] = [];
   if (cheapestMainnet) parts.push(`Cheapest observed borrow rate: ${cheapestMainnet.venueId} at ${cheapestMainnet.borrowAprPct.toFixed(2)}% APR (${cheapestMainnet.utilizationPct.toFixed(0)}% utilized, $${Math.round(cheapestMainnet.availableUsd).toLocaleString()} available).`);

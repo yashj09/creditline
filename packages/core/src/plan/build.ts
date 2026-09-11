@@ -6,7 +6,7 @@ import { encodeReceiveMessage } from "../exec/cctp.ts";
 import { buildBurn } from "../exec/cctp.ts";
 import { buildSupplyAndBorrow, collateralFor, readCometPosition, type CometPosition } from "../exec/compound.ts";
 import { buildPay } from "../exec/pay.ts";
-import type { Ranked } from "../markets/venues.ts";
+import { IMPLEMENTED_EXECUTOR_CHAINS, type Ranked } from "../markets/venues.ts";
 import type { Intent, Plan, RepayIntent, Step } from "./schema.ts";
 import { buildRepay } from "../exec/compound.ts";
 import { encodeFunctionData } from "viem";
@@ -32,7 +32,9 @@ export async function buildLiquidityPlan(params: {
   const amount = parseUnits(intent.amountUsdc.toString(), 6);
   const venue = ranked.recommended;
   if (!venue?.executable) throw new Error("no executable venue for this amount");
-  if (venue.executable.chainId !== BASE_SEPOLIA.chainId) throw new Error(`venue ${venue.venueId} executor not implemented yet (Aave Arbitrum Sepolia is a stretch goal)`);
+  if (!IMPLEMENTED_EXECUTOR_CHAINS.has(venue.executable.chainId) || venue.executable.chainId !== BASE_SEPOLIA.chainId) {
+    throw new Error(`venue ${venue.venueId} has no implemented executor`); // unreachable via rankVenues; defensive
+  }
 
   const pos: CometPosition = await readCometPosition(params.baseSepolia, account);
   const weth = collateralFor(amount, pos.wethPriceUsd, pos.liquidateCollateralFactor, params.targetHealth ?? 1.6);

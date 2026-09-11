@@ -40,5 +40,6 @@ export const tokenMessengerV2Abi = parseAbi([
 export const messageTransmitterV2Abi = parseAbi([
   "function receiveMessage(bytes message, bytes attestation) returns (bool)",
   "function localDomain() view returns (uint32)",
+  "function usedNonces(bytes32 nonce) view returns (uint256)",
   "event MessageSent(bytes message)",
 ]);
