@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Fingerprint } from "lucide-react";
 import { getGuardianSigner } from "@/lib/ledger";
+import { Button, Card, Icon, Mono, Scribble, Sticky } from "@/components/ui";
 
 interface ApprovalData {
   text: string;
@@ -58,28 +60,31 @@ export function ApprovalSheet(props: { planId: string; step: number; onDecision:
   }
 
   return (
-    <div className="panel my-2 p-4" style={{ borderColor: "var(--warn)" }}>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="pill" style={{ background: "var(--warn)", color: "#0b0d12" }}>GUARDIAN REQUIRED</span>
-        <span className="text-sm font-semibold">{data?.step.title ?? `Step ${props.step}`}</span>
+    <Card tone="warn" decoration="tack" padding="lg" className="my-4" role="region" aria-label="Guardian approval">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <Icon icon={Fingerprint} size="sm" />
+        <Sticky className="border-[3px]">Guardian required</Sticky>
+        <h3 className="font-heading text-2xl">{data?.step.title ?? `Step ${props.step}`}</h3>
       </div>
-      {data && <p className="muted mb-3 text-sm">{data.step.description}</p>}
+      {data && <p className="mb-4 text-lg text-fg/80">{data.step.description}</p>}
       {data && (
-        <pre className="mono mb-3 whitespace-pre-wrap rounded-lg p-3 text-xs" style={{ background: "#0b0d12", border: "1px solid var(--border)" }}>
-          {data.text}
-        </pre>
+        <div className="relative my-4">
+          {/* The exact payload the Ledger displays and signs. Rendered verbatim; the contract rebuilds it. */}
+          <Mono as="pre" block>{data.text}</Mono>
+          <Scribble.CornerFrame className="text-ink" />
+        </div>
       )}
-      <p className="muted mb-3 text-xs">This exact text is what your Ledger displays and signs. The contract rebuilds it and will refuse anything else.</p>
-      <div className="flex items-center gap-3">
-        <button className="btn btn-primary disabled:opacity-50" disabled={!data || busy || signed} onClick={approve}>
+      <p className="mb-5 text-base text-fg/70">This exact text is what your Ledger displays and signs. The contract rebuilds it and will refuse anything else.</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="primary" disabled={!data || busy || signed} onClick={approve}>
           {busy ? "Waiting for device…" : signed ? "Approved" : "Approve on Ledger"}
-        </button>
-        <button className="btn btn-ghost disabled:opacity-50" disabled={busy || signed} onClick={() => { setStatus("Denied."); props.onDecision(false); }}>
+        </Button>
+        <Button variant="secondary" disabled={busy || signed} onClick={() => { setStatus("Denied."); props.onDecision(false); }}>
           Deny
-        </button>
-        <span className="muted text-xs">{status}</span>
+        </Button>
+        <span className="text-base text-fg/70">{status}</span>
       </div>
-      {error && <p className="mt-2 text-xs" style={{ color: "var(--bad)" }}>{error}</p>}
-    </div>
+      {error && <p className="mt-3 text-base font-bold text-accent">{error}</p>}
+    </Card>
   );
 }

@@ -1,99 +1,145 @@
-"use client";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
-import { useState } from "react";
-import { ApprovalSheet } from "@/components/ApprovalSheet";
-import { PlanCard, PositionsCard, SimulationCard, StepReceipt, VenueTable } from "@/components/Cards";
+import Link from "next/link";
+import { Bot, CheckCircle2, FileSignature, Fingerprint, Hand, Landmark, Network, ShieldCheck, Smartphone, type LucideIcon } from "lucide-react";
+import { LiveRates } from "@/components/landing/LiveRates";
+import { RecentReceipts } from "@/components/landing/RecentReceipts";
+import { Card, Icon, Scribble, SketchHeading, Sticky, buttonClasses } from "@/components/ui";
 
-const SUGGESTIONS = [
-  "I need 100 USDC on Arc by Friday to pay 0x000000000000000000000000000000000000dEaD. Don't sell my ETH.",
-  "What are the cheapest USDC borrow rates right now?",
-  "Show my positions and remaining mandate.",
+const BEATS: { icon: LucideIcon; title: string; body: string }[] = [
+  { icon: FileSignature, title: "You set a mandate", body: "Per-tx cap, daily cap, expiry, allow-list. Signed by your wallet, stored on-chain." },
+  { icon: Bot, title: "It borrows on its own", body: "Wrap, supply, borrow on Compound v3 — reversible, inside caps, no human needed." },
+  { icon: Hand, title: "Bridging needs you", body: "A CCTP burn can't be undone. The agent stops and asks." },
+  { icon: Smartphone, title: "Your Ledger shows the text", body: "Plain words, clear-signed. What you read is what the contract enforces." },
+  { icon: CheckCircle2, title: "Tap. Settled on Arc.", body: "Fast Transfer lands in ~8s, the payee is paid in USDC, repayment is scheduled." },
 ];
 
-export default function ChatPage() {
-  const { messages, sendMessage, addToolApprovalResponse, status } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
-  });
-  const [input, setInput] = useState("");
+const HOW: { icon: LucideIcon; title: string; body: string }[] = [
+  { icon: ShieldCheck, title: "Caps live on-chain", body: "MandateAccount measures USDC outflow per step and per rolling day. The agent cannot raise its own limits." },
+  { icon: Bot, title: "Reversible steps run alone", body: "Supplying collateral and borrowing can be unwound, so the agent executes them without asking." },
+  { icon: Fingerprint, title: "Irreversible steps wait for a tap", body: "Bridges and payments require a guardian signature from a Ledger. No blind signing — the device shows the text." },
+];
 
+const RAILS: { icon: LucideIcon; title: string; body: string }[] = [
+  { icon: Landmark, title: "Arc · Circle", body: "Native USDC settlement and gas. CCTP v2 Fast Transfer brings borrowed USDC over in seconds." },
+  { icon: Network, title: "The Graph", body: "One Messari standardized query ranks live borrow rates across Aave v3, Compound v3 and Spark." },
+  { icon: Fingerprint, title: "Ledger", body: "Clear-signed EIP-191 text; the contract rebuilds it byte-for-byte and refuses anything else." },
+];
+
+export default function LandingPage() {
   return (
-    <div className="grid gap-6 md:grid-cols-[1fr_280px]">
-      <section>
-        <div className="space-y-4">
-          {messages.length === 0 && (
-            <div className="panel p-6">
-              <h1 className="mb-1 text-xl font-semibold">Tell the agent what you need.</h1>
-              <p className="muted mb-4 text-sm">It borrows against your ETH, bridges to Arc, pays, and schedules repayment — inside your mandate. Irreversible steps wait for your Ledger.</p>
-              <div className="flex flex-wrap gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button key={s} className="btn btn-ghost text-xs" onClick={() => sendMessage({ text: s })}>{s}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {messages.map((m) => (
-            <div key={m.id} className={m.role === "user" ? "ml-auto max-w-[85%]" : "max-w-[95%]"}>
-              <div className="muted mb-1 text-[11px] uppercase tracking-wide">{m.role === "user" ? "you" : "mandate"}</div>
-              {m.parts.map((part: any, i) => {
-                if (part.type === "text") return <p key={i} className="whitespace-pre-wrap text-sm leading-relaxed">{part.text}</p>;
-                if (part.type === "tool-get_positions" && part.state === "output-available") return <PositionsCard key={i} data={part.output} />;
-                if (part.type === "tool-get_markets" && part.state === "output-available") return <VenueTable key={i} data={part.output} />;
-                if ((part.type === "tool-draft_plan" || part.type === "tool-get_plan") && part.state === "output-available") return <PlanCard key={i} plan={part.output} />;
-                if (part.type === "tool-simulate_plan" && part.state === "output-available") return <SimulationCard key={i} data={part.output} />;
-                if (part.type === "tool-execute_step") {
-                  if (part.state === "approval-requested") {
-                    return (
-                      <ApprovalSheet
-                        key={part.toolCallId}
-                        planId={part.input.planId}
-                        step={part.input.step}
-                        onDecision={(approved) => addToolApprovalResponse({ id: part.approval.id, approved, reason: approved ? "signed on guardian device" : "denied by user" })}
-                      />
-                    );
-                  }
-                  if (part.state === "output-available") return <StepReceipt key={i} out={part.output} />;
-                  if (part.state === "output-denied") return <div key={i} className="panel my-2 p-3 text-sm" style={{ borderColor: "var(--bad)" }}>Step {part.input.step} denied by guardian.</div>;
-                  if (part.state === "input-available" || part.state === "input-streaming") return <div key={i} className="muted text-xs">executing step {part.input?.step}…</div>;
-                }
-                if (typeof part.type === "string" && part.type.startsWith("tool-") && part.state === "output-error") {
-                  return <div key={i} className="text-xs" style={{ color: "var(--bad)" }}>{part.errorText}</div>;
-                }
-                return null;
-              })}
-            </div>
-          ))}
-          {status === "streaming" || status === "submitted" ? <div className="muted text-xs">thinking…</div> : null}
+    <div className="space-y-4">
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <section className="relative py-12 md:py-20">
+        <Scribble.CornerFrame className="hidden text-fg/40 md:block" />
+        <Sticky rotate={3} className="mb-6">bounded delegation for AI agents</Sticky>
+        <SketchHeading as="h1" className="max-w-4xl text-5xl md:text-7xl">
+          Claude spends.{" "}
+          You set the{" "}
+          <span className="whitespace-nowrap">
+            <span className="relative inline-block">
+              limits
+              <Scribble.DashedCircle className="absolute -left-3 -right-3 -top-2 -bottom-2 hidden h-[calc(100%+1rem)] w-[calc(100%+1.5rem)] text-ink md:block" />
+            </span>
+            <Scribble.Bang />
+          </span>
+        </SketchHeading>
+        <p className="mt-6 max-w-2xl text-xl leading-relaxed text-fg/80 first-letter:float-left first-letter:mr-2 first-letter:font-heading first-letter:text-6xl first-letter:leading-none md:text-2xl">
+          Claude executes real on-chain financial actions for you, inside limits you set, with a hardware tap for anything irreversible.
+        </p>
+        <div className="relative mt-10 flex flex-wrap items-center gap-4">
+          <Scribble.Arrow className="absolute -top-20 -left-6 hidden h-24 w-32 animate-bounce-slow text-fg md:block" />
+          <Link href="/chat" className={buttonClasses("primary", "md", "text-xl")}>Open the console</Link>
+          <Link href="/mandate" className={buttonClasses("secondary", "md")}>Set a mandate</Link>
         </div>
-        <form
-          className="mt-6 flex gap-2"
-          onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; sendMessage({ text: input }); setInput(""); }}
-        >
-          <input className="panel flex-1 px-4 py-3 text-sm outline-none" value={input} onChange={(e) => setInput(e.target.value)} placeholder="I need 100 USDC on Arc by Friday…" />
-          <button className="btn btn-primary" type="submit" disabled={status !== "ready"}>Send</button>
-        </form>
       </section>
-      <aside className="space-y-3 text-xs">
-        <div className="panel p-4">
-          <div className="mb-2 font-semibold">How authority works</div>
-          <ul className="muted space-y-1">
-            <li>• Allow-listed actions inside caps run autonomously.</li>
-            <li>• Bridging and paying third parties are irreversible → Ledger tap.</li>
-            <li>• Caps are enforced on measured USDC outflow, on-chain.</li>
-            <li>• The Ledger clear-signs plain text; the contract rebuilds it.</li>
-          </ul>
+
+      {/* ── Hero loop: 5 beats, CSS-timed ───────────────────────────────── */}
+      <section className="py-12 md:py-20" aria-labelledby="loop-heading">
+        <h2 id="loop-heading" className="mb-8"><Sticky rotate={0}>One intent, start to finish</Sticky></h2>
+        <div className="relative">
+          <Scribble.Squiggle className="absolute top-1/2 left-0 hidden h-6 w-full -translate-y-1/2 text-fg/40 md:block" />
+          <ol className="relative grid grid-cols-1 gap-6 md:grid-cols-5">
+            {BEATS.map((b, i) => (
+              <Card
+                key={b.title}
+                as="li"
+                decoration="tape"
+                rotate={i}
+                padding="sm"
+                className="z-10 animate-beat hover:[animation-play-state:paused]"
+                style={{ animationDelay: `${i * 2}s` }}
+              >
+                <div className="mb-3 flex items-center gap-3">
+                  <Icon icon={b.icon} size="sm" />
+                  <span className="font-heading text-base text-fg/60">{i + 1}</span>
+                </div>
+                <h3 className="font-heading text-xl">{b.title}</h3>
+                <p className="mt-1 text-base text-fg/80">{b.body}</p>
+              </Card>
+            ))}
+          </ol>
         </div>
-        <div className="panel p-4">
-          <div className="mb-2 font-semibold">Rails</div>
-          <ul className="muted space-y-1">
-            <li>• Borrow: Compound v3 · Base Sepolia (real USDC)</li>
-            <li>• Bridge: Circle CCTP v2 Fast Transfer → Arc</li>
-            <li>• Pay & repay schedule: Arc (USDC gas)</li>
-            <li>• Rates: The Graph standardized subgraphs</li>
-          </ul>
+      </section>
+
+      {/* ── How it works ────────────────────────────────────────────────── */}
+      <section className="py-12 md:py-20" aria-labelledby="how-heading">
+        <SketchHeading as="h2" id="how-heading" underline="wavy" className="mb-10">How it works</SketchHeading>
+        <div className="relative">
+          <Scribble.Squiggle className="absolute top-8 left-1/6 hidden h-5 w-2/3 text-ink/40 md:block" />
+          <div className="grid gap-8 md:grid-cols-3">
+            {HOW.map((h, i) => (
+              <Card key={h.title} decoration="tack" rotate={i + 1} className="z-10">
+                <div className="mb-4 flex items-center gap-3">
+                  <Icon icon={h.icon} />
+                  <span className="inline-flex h-8 w-8 items-center justify-center border-2 border-fg bg-postit wobbly-pill font-heading">{i + 1}</span>
+                </div>
+                <h3 className="font-heading text-2xl">{h.title}</h3>
+                <p className="mt-2 text-lg text-fg/80">{h.body}</p>
+              </Card>
+            ))}
+          </div>
         </div>
-      </aside>
+      </section>
+
+      {/* ── Live rates ──────────────────────────────────────────────────── */}
+      <section className="py-12 md:py-20" aria-labelledby="rates-heading">
+        <div className="mb-6 flex flex-wrap items-baseline gap-4">
+          <h2 id="rates-heading"><Sticky rotate={2}>Live USDC borrow rates</Sticky></h2>
+          <p className="text-lg text-fg/70">The agent shops venues with one standardized query. This is the same table it reasons over.</p>
+        </div>
+        <LiveRates />
+      </section>
+
+      {/* ── Receipts ────────────────────────────────────────────────────── */}
+      <section className="py-12 md:py-20" aria-labelledby="receipts-heading">
+        <div className="mb-6 flex flex-wrap items-baseline gap-4">
+          <h2 id="receipts-heading"><Sticky rotate={1}>Receipts</Sticky></h2>
+          <p className="text-lg text-fg/70">Every executed step leaves a hash and a reason.</p>
+        </div>
+        <RecentReceipts />
+      </section>
+
+      {/* ── Rails ───────────────────────────────────────────────────────── */}
+      <section className="py-12 md:py-20" aria-labelledby="rails-heading">
+        <SketchHeading as="h2" id="rails-heading" underline="highlight" className="mb-10">Built on</SketchHeading>
+        <div className="grid gap-8 md:grid-cols-3">
+          {RAILS.map((r, i) => (
+            <Card key={r.title} tone="postit" decoration="tape" rotate={i + 2}>
+              <div className="mb-4"><Icon icon={r.icon} /></div>
+              <h3 className="font-heading text-2xl">{r.title}</h3>
+              <p className="mt-2 text-lg text-fg/80">{r.body}</p>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <footer className="flex flex-wrap items-center justify-between gap-4 border-t-[3px] border-dashed border-fg/50 py-10 text-base text-fg/60">
+        <span><span className="font-heading text-xl text-fg">Mandate</span> · Base Sepolia · Arc testnet</span>
+        <nav aria-label="Footer" className="flex gap-5">
+          <Link href="/chat" className="hover:text-ink hover:underline hover:decoration-wavy">Chat</Link>
+          <Link href="/mandate" className="hover:text-ink hover:underline hover:decoration-wavy">Mandate</Link>
+          <Link href="/activity" className="hover:text-ink hover:underline hover:decoration-wavy">Activity</Link>
+        </nav>
+      </footer>
     </div>
   );
 }

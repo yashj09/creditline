@@ -1,22 +1,72 @@
 @import "tailwindcss";
 
-:root {
-  --bg: #0b0d12;
-  --panel: #12151d;
-  --border: #232838;
-  --text: #e7e9ee;
-  --muted: #8b93a7;
-  --accent: #7c9cff;
-  --ok: #3ddc97;
-  --warn: #ffb347;
-  --bad: #ff6b6b;
+/* ── Hand-Drawn design tokens ─────────────────────────────────────────────── */
+@theme {
+  /* strict palette: pencil, paper, red marker, blue ballpoint, post-it */
+  --color-*: initial;
+  --color-paper: #fdfbf7;
+  --color-fg: #2d2d2d;
+  --color-muted: #e5e0d8;
+  --color-accent: #ff4d4d;
+  --color-ink: #2d5da1;
+  --color-postit: #fff9c4;
+  --color-card: #ffffff;
+  --color-white: #ffffff;
+  --color-transparent: transparent;
+
+  /* hard offset shadows: cut-paper collage, never blurred */
+  --shadow-sketch-sm: 2px 2px 0 0 #2d2d2d;
+  --shadow-sketch: 4px 4px 0 0 #2d2d2d;
+  --shadow-sketch-md: 6px 6px 0 0 #2d2d2d;
+  --shadow-sketch-lg: 8px 8px 0 0 #2d2d2d;
+  --shadow-sketch-soft: 3px 3px 0 0 rgb(45 45 45 / 0.1);
+
+  --animate-bounce-slow: sketch-bounce 3s ease-in-out infinite;
+  --animate-wiggle: sketch-wiggle 1.2s ease-in-out infinite;
+  /* hero loop: 5 beats × 2s; each card sets animation-delay = i * 2s */
+  --animate-beat: sketch-beat 10s steps(1, end) infinite;
+
+  @keyframes sketch-bounce {
+    0%, 100% { translate: 0 0; }
+    50% { translate: 0 -6px; }
+  }
+  @keyframes sketch-wiggle {
+    0%, 100% { rotate: -6deg; }
+    50% { rotate: 6deg; }
+  }
+  @keyframes sketch-beat {
+    0% { background-color: #fff9c4; box-shadow: 8px 8px 0 0 #2d2d2d; translate: 0 -4px; }
+    20%, 100% { background-color: #ffffff; box-shadow: 3px 3px 0 0 rgb(45 45 45 / 0.1); translate: 0 0; }
+  }
 }
 
-html, body { background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif; }
-.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.muted { color: var(--muted); }
-.btn { border-radius: 8px; padding: 8px 14px; font-weight: 600; }
-.btn-primary { background: var(--accent); color: #0b0d12; }
-.btn-ghost { border: 1px solid var(--border); color: var(--text); }
-.pill { border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+/* fonts arrive as CSS vars from next/font on <html>; inline so utilities emit the var() chain */
+@theme inline {
+  --font-heading: var(--font-kalam), "Comic Sans MS", cursive;
+  --font-body: var(--font-patrick), "Segoe Print", cursive, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* wobbly, hand-drawn corners — never a plain rounded-* alone */
+@utility wobbly { border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px; }
+@utility wobbly-md { border-radius: 125px 10px 120px 10px / 10px 120px 10px 125px; }
+@utility wobbly-sm { border-radius: 25px 8px 22px 8px / 8px 22px 8px 25px; }
+@utility wobbly-pill { border-radius: 60% 40% 55% 45% / 45% 55% 45% 55%; }
+
+@layer base {
+  html { color-scheme: light; }
+  body {
+    @apply bg-paper text-fg font-body text-lg antialiased min-h-screen;
+    background-image: radial-gradient(#e5e0d8 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  h1, h2, h3 { @apply font-heading font-bold leading-tight; }
+  ::selection { background: #fff9c4; color: #2d2d2d; }
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
