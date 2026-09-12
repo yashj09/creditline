@@ -18,7 +18,9 @@ export class CircleAgentWallet implements AgentWallet {
 
   private async sdk() {
     if (!this.client) {
-      const mod = await import("@circle-fin/developer-controlled-wallets");
+      let mod: any;
+      try { mod = await import("@circle-fin/developer-controlled-wallets"); }
+      catch { throw new Error("Circle wallets require the optional dependency @circle-fin/developer-controlled-wallets — install it, or unset CIRCLE_* to use a local agent key"); }
       this.client = mod.initiateDeveloperControlledWalletsClient({
         apiKey: this.cfg.apiKey,
         entitySecret: this.cfg.entitySecret,

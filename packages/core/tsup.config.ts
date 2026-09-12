@@ -1,6 +1,6 @@
 import { defineConfig } from "tsup";
 export default defineConfig({
-  entry: { index: "src/index.ts", "ledger-web": "src/ledger-web.ts" },
+  entry: { index: "src/index.ts", "ledger-web": "src/ledger-web.ts", abi: "src/abi.ts", chains: "src/chains.ts" },
   format: ["esm"],
   dts: true,
   sourcemap: true,

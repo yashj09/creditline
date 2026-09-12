@@ -1,4 +1,4 @@
-import { createPublicClient, formatUnits, http, type Address, type Chain, type Hex, type PublicClient } from "viem";
+import { createPublicClient, formatUnits, http, parseAbiItem, type Address, type Chain, type Hex, type PublicClient } from "viem";
 import { MandateAccountAbi } from "./abi/MandateAccount.ts";
 import { ARC_TESTNET, BASE_SEPOLIA, CCTP } from "./addresses.ts";
 import { getAction } from "./actions/registry.ts";
@@ -11,7 +11,7 @@ import { waitForAttestation, type Attestation } from "./exec/cctp.ts";
 import { readCometPosition } from "./exec/compound.ts";
 import { usdcBalance } from "./exec/cctp.ts";
 import type { GuardianSigner } from "./guardian/types.ts";
-import { fetchMarkets, fetchMorphoUsdcRates, rankVenues, COMPOUND_V3_BASE_TWIN, type MarketsSnapshot, type Ranked } from "./markets/index.ts";
+import { compoundTwinRate, fetchMarkets, fetchMorphoUsdcRates, rankVenues, type MarketsSnapshot, type Ranked } from "./markets/index.ts";
 import type { Intent, Plan, RepayIntent, Step } from "./plan/schema.ts";
 import { simulateStep, type StepSimulation } from "./sim/simulate.ts";
 import { memoryStore } from "./store/memory.ts";
@@ -153,8 +153,7 @@ export class MandateClient {
     else {
       snapshot = { fetchedAt: new Date().toISOString(), rates: [], warnings: ["GRAPH_API_KEY not set — standardized subgraphs skipped"] };
       try { snapshot.rates.push(...(await fetchMorphoUsdcRates())); } catch (e) { snapshot.warnings.push(describeError(e)); }
-      const pos = await readCometPosition(base, this.account);
-      snapshot.rates.push({ venueId: "compound-v3-base-sepolia", protocol: "compound-v3", network: "base-sepolia", chainId: 84532, marketName: "cUSDCv3 (testnet twin of Compound v3 Base)", asset: "USDC", borrowAprPct: pos.borrowAprPct, supplyAprPct: pos.supplyAprPct, utilizationPct: pos.utilizationPct, availableUsd: Number(pos.availableUsdc) / 1e6, totalBorrowUsd: 0, totalDepositUsd: Number(pos.availableUsdc) / 1e6, source: "messari-standardized", observedAt: Math.floor(Date.now() / 1000), executable: COMPOUND_V3_BASE_TWIN });
+      try { snapshot.rates.push(await compoundTwinRate(base)); } catch (e) { snapshot.warnings.push(describeError(e)); }
     }
     return { snapshot, ranked: rankVenues(snapshot, amountUsdc) };
   }
@@ -209,6 +208,7 @@ export class MandateClient {
     for (const step of plan.steps) {
       if (step.status === "executing" && (await this.isExecutedOnChain(plan, step))) this.markDone(plan, step, step.txHash as Hex | undefined);
       if (isDone(step)) { results.push({ step: step.index, title: step.title, ok: true, notes: ["already executed"] }); continue; }
+      if (step.calls.length === 0 && !step.params) { results.push({ step: step.index, title: step.title, ok: false, revertReason: "plan predates the current SDK; draft it again", notes: [] }); step.status = "failed"; priorDone = false; continue; }
       const sim = await simulateStep(this.pub(step.chainId), step, { account: this.account, agent, owner, planId: planIdToBytes32(plan.id), priorStepsDone: priorDone });
       step.simulation = sim;
       if (step.status !== "awaiting_guardian") step.status = sim.ok ? "simulated" : "failed";
@@ -269,6 +269,25 @@ export class MandateClient {
   private calls(step: Step): Call[] { return step.calls.map((c) => ({ target: c.target as Address, value: BigInt(c.value), data: c.data as Hex })); }
   private markDone(plan: Plan, step: Step, txHash?: Hex) { step.status = "done"; if (txHash) { step.txHash = txHash; step.explorer = this.explorer(step.chainId, txHash); } }
 
+  /**
+   * Recovers the tx hash of an already-executed call-step from the account's StepExecuted logs (bounded lookback).
+   * Used when a send was broadcast but the receipt never came back to us.
+   */
+  async findStepTxHash(plan: Plan, step: Step, lookbackBlocks = 200_000n): Promise<Hex | undefined> {
+    const pub = this.pub(step.chainId);
+    const latest = await pub.getBlockNumber();
+    const event = parseAbiItem("event StepExecuted(bytes32 indexed planId, uint8 indexed step, uint256 usdcOut, bytes32 callsHash, bool guarded)");
+    const chunk = 9_000n;
+    for (let to = latest; to > 0n && latest - to < lookbackBlocks; to -= chunk) {
+      const from = to > chunk ? to - chunk + 1n : 0n;
+      try {
+        const logs = await pub.getLogs({ address: this.account, event, args: { planId: planIdToBytes32(plan.id), step: step.index }, fromBlock: from, toBlock: to });
+        if (logs.length) return logs[logs.length - 1]!.transactionHash;
+      } catch { /* provider range limits: keep walking back */ }
+    }
+    return undefined;
+  }
+
   private async isExecutedOnChain(plan: Plan, step: Step, attestation?: Attestation): Promise<boolean> {
     if (step.calls.length > 0) return this.pub(step.chainId).readContract({ address: this.account, abi: MandateAccountAbi, functionName: "executed", args: [planIdToBytes32(plan.id), step.index] });
     const adapter = getAction(step.kind);
@@ -285,45 +304,60 @@ export class MandateClient {
     if (isDone(step)) return { ok: true, step: index, title: step.title, summary: step.title, txHash: step.txHash as Hex | undefined, explorer: step.explorer, alreadyDone: true };
 
     const chainId = step.chainId, pub = this.pub(chainId), planIdHex = planIdToBytes32(plan.id);
+    if (step.calls.length === 0 && !step.params) {
+      return { ok: false, step: index, error: "this plan predates the current SDK (no step params); draft it again" };
+    }
     const adapter = getAction(step.kind);
     const exeCtx: ExecutionContext = { ...this.ctx(), plan, step };
-
-    // relay: fetch the attestation first (needed for both the idempotency probe and the send)
-    if (step.kind === "bridge_relay") {
-      const burn = plan.steps.find((s) => s.kind === "bridge_burn" && s.index < step.index);
-      if (!burn?.txHash) return { ok: false, step: index, error: "bridge burn tx missing" };
-      const srcDomain = burn.chainId === BASE_SEPOLIA.chainId ? BASE_SEPOLIA.domain : ARC_TESTNET.domain;
-      exeCtx.attestation = await waitForAttestation(srcDomain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
-    }
-
-    if (await this.isExecutedOnChain(plan, step, exeCtx.attestation)) {
-      this.markDone(plan, step, step.txHash as Hex | undefined); await this.store.plans.save(plan);
-      await this.store.audit.write({ planId: plan.id, step: index, kind: "info", chainId, summary: `Step ${index} was already executed on-chain; marked done without re-sending` });
-      return { ok: true, step: index, title: step.title, summary: step.title, txHash: step.txHash as Hex | undefined, explorer: step.explorer, alreadyDone: true };
-    }
-
-    if (step.calls.length > 0) {
-      const sim: StepSimulation = await simulateStep(pub, step, { account: this.account, agent: await this.agentAddress(), owner: await this.owner(), planId: planIdHex, priorStepsDone: true });
-      step.simulation = sim;
-      if (!sim.ok) { step.status = "failed"; await this.store.plans.save(plan); await this.store.audit.write({ planId: plan.id, step: index, kind: "error", chainId, summary: `Pre-flight simulation failed: ${sim.revertReason}` }); return { ok: false, step: index, error: `simulation failed: ${sim.revertReason}` }; }
-    }
-
     let approval: StoredApproval | null = null;
-    if (step.requiresGuardian) {
-      approval = await this.store.approvals.get(plan.id, step.index);
-      if (approval) {
-        const liveNonce = await pub.readContract({ address: this.account, abi: MandateAccountAbi, functionName: "guardianNonce" });
-        if (approval.nonce !== liveNonce.toString() || Number(approval.deadline) <= Math.floor(Date.now() / 1000) + 30) {
-          await this.store.approvals.delete(plan.id, step.index); approval = null;
-          await this.store.audit.write({ planId: plan.id, step: index, kind: "info", chainId, summary: "Stored guardian approval was stale (nonce moved or deadline passed); a fresh approval is required" });
+
+    // ---- pre-flight (never throws out: every failure is a structured result) -----------------------------
+    try {
+      if (step.kind === "bridge_relay") {
+        const burn = plan.steps.find((s) => s.kind === "bridge_burn" && s.index < step.index);
+        if (!burn) return { ok: false, step: index, error: "bridge burn step missing" };
+        if (!burn.txHash) {
+          const recovered = await this.findStepTxHash(plan, burn); // burn landed but we lost the receipt
+          if (!recovered) return { ok: false, step: index, error: "bridge burn tx hash unknown; could not recover it from chain logs" };
+          burn.txHash = recovered; burn.explorer = this.explorer(burn.chainId, recovered); await this.store.plans.save(plan);
+        }
+        const srcDomain = burn.chainId === BASE_SEPOLIA.chainId ? BASE_SEPOLIA.domain : ARC_TESTNET.domain;
+        exeCtx.attestation = await waitForAttestation(srcDomain, burn.txHash as Hex, { timeoutMs: 4 * 60_000 });
+      }
+
+      if (await this.isExecutedOnChain(plan, step, exeCtx.attestation)) {
+        const hash = (step.txHash as Hex | undefined) ?? (step.calls.length > 0 ? await this.findStepTxHash(plan, step) : undefined);
+        this.markDone(plan, step, hash); await this.store.plans.save(plan);
+        await this.store.audit.write({ planId: plan.id, step: index, kind: "info", chainId, summary: `Step ${index} was already executed on-chain; marked done without re-sending` });
+        return { ok: true, step: index, title: step.title, summary: step.title, txHash: hash, explorer: step.explorer, alreadyDone: true };
+      }
+
+      if (step.calls.length > 0) {
+        const sim: StepSimulation = await simulateStep(pub, step, { account: this.account, agent: await this.agentAddress(), owner: await this.owner(), planId: planIdHex, priorStepsDone: true });
+        step.simulation = sim;
+        if (!sim.ok) { step.status = "failed"; await this.store.plans.save(plan); await this.store.audit.write({ planId: plan.id, step: index, kind: "error", chainId, summary: `Pre-flight simulation failed: ${sim.revertReason}` }); return { ok: false, step: index, error: `simulation failed: ${sim.revertReason}` }; }
+      }
+
+      if (step.requiresGuardian) {
+        approval = await this.store.approvals.get(plan.id, step.index);
+        if (approval) {
+          const liveNonce = await pub.readContract({ address: this.account, abi: MandateAccountAbi, functionName: "guardianNonce" });
+          if (approval.nonce !== liveNonce.toString() || Number(approval.deadline) <= Math.floor(Date.now() / 1000) + 30) {
+            await this.store.approvals.delete(plan.id, step.index); approval = null;
+            await this.store.audit.write({ planId: plan.id, step: index, kind: "info", chainId, summary: "Stored guardian approval was stale (nonce moved or deadline passed); a fresh approval is required" });
+          }
+        }
+        if (!approval && this.guardianSigner) approval = await this.approvals.signWith(this.guardianSigner, plan, step);
+        if (!approval) {
+          const pending = await this.approvals.request(plan, step);
+          step.status = "awaiting_guardian"; await this.store.plans.save(plan);
+          return { ok: false, step: index, awaitingGuardian: true, approval: pending, error: "Guardian signature missing or stale. The guardian must sign the approval text first." };
         }
       }
-      if (!approval && this.guardianSigner) approval = await this.approvals.signWith(this.guardianSigner, plan, step);
-      if (!approval) {
-        const pending = await this.approvals.request(plan, step);
-        step.status = "awaiting_guardian"; await this.store.plans.save(plan);
-        return { ok: false, step: index, awaitingGuardian: true, approval: pending, error: "Guardian signature missing or stale. The guardian must sign the approval text first." };
-      }
+    } catch (e) {
+      const msg = describeError(e);
+      await this.store.audit.write({ planId: plan.id, step: index, kind: "error", chainId, summary: `pre-flight: ${msg}` });
+      return { ok: false, step: index, error: msg };
     }
 
     step.status = "executing"; await this.store.plans.save(plan);
@@ -342,7 +376,11 @@ export class MandateClient {
       }
     } catch (e) {
       const msg = describeError(e);
-      if (await this.isExecutedOnChain(plan, step, exeCtx.attestation)) { this.markDone(plan, step); await this.store.plans.save(plan); return { ok: true, step: index, title: step.title, summary: step.title, alreadyDone: true, note: "a previous attempt had already executed this step" }; }
+      if (await this.isExecutedOnChain(plan, step, exeCtx.attestation)) {
+        const hash = step.calls.length > 0 ? await this.findStepTxHash(plan, step) : undefined; // keep the hash: later steps (relay) need it
+        this.markDone(plan, step, hash); await this.store.plans.save(plan);
+        return { ok: true, step: index, title: step.title, summary: step.title, txHash: hash, explorer: step.explorer, alreadyDone: true, note: "a previous attempt had already executed this step" };
+      }
       if (approval && /BadGuardianSignature|ApprovalExpired/.test(msg)) await this.store.approvals.delete(plan.id, step.index);
       step.status = "failed"; await this.store.plans.save(plan);
       await this.store.audit.write({ planId: plan.id, step: index, kind: "error", chainId, summary: msg });

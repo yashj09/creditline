@@ -1,6 +1,6 @@
 {
   "name": "@yashjain99/mandate-ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "exports": {
@@ -61,6 +61,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/yashj09/mandate",
-    "directory": "packages/ai"
+    "directory": "packages/agent"
   }
 }

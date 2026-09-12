@@ -14,7 +14,7 @@ export interface VenueRate {
   availableUsd: number;
   totalBorrowUsd: number;
   totalDepositUsd: number;
-  source: "messari-standardized" | "aave-official" | "morpho-api";
+  source: "messari-standardized" | "aave-official" | "morpho-api" | "onchain";
   observedBlock?: number;
   observedAt?: number; // unix seconds
   /** Where Mandate can actually execute this venue today (testnet twin), if anywhere. */

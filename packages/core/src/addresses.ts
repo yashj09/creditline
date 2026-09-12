@@ -54,3 +54,11 @@ export function loadDeployment(name: "base-sepolia" | "arc-testnet" | "arb-sepol
   if (!existsSync(p)) return null;
   return JSON.parse(readFileSync(p, "utf8")) as Deployment;
 }
+
+/** USDC ERC-20 address for a supported chain (on Arc this is the ERC-20 view of the native token). */
+export function usdcFor(chainId: number): Address {
+  if (chainId === BASE_SEPOLIA.chainId) return BASE_SEPOLIA.usdc;
+  if (chainId === ARC_TESTNET.chainId) return ARC_TESTNET.usdc;
+  if (chainId === ARB_SEPOLIA.chainId) return ARB_SEPOLIA.usdc;
+  throw new Error(`no USDC address configured for chain ${chainId}`);
+}

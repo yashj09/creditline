@@ -6,7 +6,7 @@ import type { Address, Hex } from "viem";
  * the mandate on-chain is what bounds them.
  */
 export interface AgentWallet {
-  readonly kind: "local" | "circle";
+  readonly kind: "local" | "circle" | "readonly";
   address(chainId: number): Promise<Address>;
   /** Sends a transaction and resolves once it is mined; returns the tx hash. */
   send(params: { chainId: number; to: Address; data: Hex; value?: bigint }): Promise<Hex>;

@@ -1,6 +1,6 @@
 {
   "name": "@yashjain99/mandate-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "bin": {
@@ -48,5 +48,8 @@
     "type": "git",
     "url": "https://github.com/yashj09/mandate",
     "directory": "apps/mcp"
+  },
+  "optionalDependencies": {
+    "@circle-fin/developer-controlled-wallets": "^10.8.0"
   }
 }

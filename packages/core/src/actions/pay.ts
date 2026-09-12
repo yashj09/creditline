@@ -1,5 +1,5 @@
 import type { Address } from "viem";
-import { ARC_TESTNET } from "../addresses.ts";
+import { ARC_TESTNET, usdcFor } from "../addresses.ts";
 import { buildPay } from "../exec/pay.ts";
 import type { ActionAdapter } from "./types.ts";
 
@@ -18,7 +18,7 @@ export const pay: ActionAdapter<PayParams> = {
     return {
       title: `Pay ${amt} USDC to ${p.to.slice(0, 6)}…${p.to.slice(-4)} on ${chain === ARC_TESTNET.chainId ? "Arc" : "Base"}`,
       description: mode === "native" ? "Native USDC transfer on Arc. Value leaves the account → guardian approval." : "ERC-20 USDC transfer. Value leaves the account → guardian approval.",
-      calls: buildPay({ to: p.to, amountUsdc6: p.amountUsdc6, mode, usdc: mode === "erc20" ? ARC_TESTNET.usdc : undefined }),
+      calls: buildPay({ to: p.to, amountUsdc6: p.amountUsdc6, mode, usdc: mode === "erc20" ? usdcFor(chain) : undefined }),
       maxUsdcOut: p.amountUsdc6,
     };
   },

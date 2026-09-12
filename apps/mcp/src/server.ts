@@ -8,6 +8,7 @@
  *      MANDATE_STORE_DIR (default ~/.mandate), GRAPH_API_KEY, MANDATE_GUARDIAN_KEY (dev only), MANDATE_ENV_FILE (optional .env path)
  */
 import { config as loadEnv } from "dotenv";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -16,11 +17,16 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createMandateFromEnv, fileStore } from "@yashjain99/mandate-sdk";
 import { MANDATE_SYSTEM_PROMPT, registerMandateMcpTools } from "@yashjain99/mandate-ai";
 
-loadEnv({ path: process.env.MANDATE_ENV_FILE ?? resolve(process.cwd(), ".env"), quiet: true });
+// Env: explicit file, else the first .env found walking up from cwd (in-repo runs), else nothing (npx with env vars).
+const envFile = process.env.MANDATE_ENV_FILE ?? [".env", "../.env", "../../.env"].map((p) => resolve(process.cwd(), p)).find(existsSync);
+if (envFile) loadEnv({ path: envFile, quiet: true });
 
-const client = createMandateFromEnv({ store: fileStore(process.env.MANDATE_STORE_DIR ?? resolve(homedir(), ".mandate")) });
-const server = new McpServer({ name: "mandate", version: "0.1.0" }, { instructions: MANDATE_SYSTEM_PROMPT });
-registerMandateMcpTools(server, client);
+// Store: explicit dir, else the workspace .data when running in-repo (shared with the web console), else ~/.mandate.
+const storeDir = process.env.MANDATE_STORE_DIR ?? [resolve(process.cwd(), ".data"), resolve(process.cwd(), "../../.data")].find(existsSync) ?? resolve(homedir(), ".mandate");
+
+const server = new McpServer({ name: "mandate", version: "0.1.1" }, { instructions: MANDATE_SYSTEM_PROMPT });
+// Lazy client: the MCP handshake always succeeds; misconfiguration surfaces as a tool error the model can relay.
+registerMandateMcpTools(server, () => createMandateFromEnv({ store: fileStore(storeDir) }));
 
 const httpIdx = process.argv.indexOf("--http");
 if (httpIdx >= 0) {

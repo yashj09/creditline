@@ -1,4 +1,4 @@
-import { registerAction } from "./registry.ts";
+import { registerAction, setDefaultRegistrar } from "./registry.ts";
 import { compoundRepay, compoundSupplyBorrow } from "./compound.ts";
 import { cctpBurn, cctpRelay } from "./cctp.ts";
 import { pay } from "./pay.ts";
@@ -15,4 +15,4 @@ export * from "./repayment.ts";
 export function registerBuiltinActions(): void {
   for (const a of [compoundSupplyBorrow, compoundRepay, cctpBurn, cctpRelay, pay, scheduleRepayment, markRepaid]) registerAction(a);
 }
-registerBuiltinActions();
+setDefaultRegistrar(registerBuiltinActions);

@@ -1,6 +1,6 @@
 import { convertToModelMessages, createUIMessageStreamResponse, stepCountIs, streamText, toUIMessageStream, type UIMessage } from "ai";
 import { model } from "@/lib/model";
-import { SYSTEM_PROMPT, toolApproval, tools } from "@/lib/agent";
+import { SYSTEM_PROMPT, getToolApproval, getTools } from "@/lib/agent";
 
 export const maxDuration = 300;
 
@@ -10,10 +10,10 @@ export async function POST(req: Request) {
     model: model(),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
-    tools,
+    tools: getTools(),
     stopWhen: stepCountIs(16),
     // Guardian steps pause here; the UI collects the Ledger signature via /api/approval, then approves.
-    toolApproval,
+    toolApproval: getToolApproval(),
     experimental_toolApprovalSecret: process.env.TOOL_APPROVAL_SECRET ?? "dev-only-secret-change-me",
   });
   return createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream }) });

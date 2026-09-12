@@ -32,9 +32,9 @@ export const recipes = {
     if (pos.debtUsdc === 0n) throw new Error("no Compound debt to repay");
     const requested = parseUnits(intent.amountUsdc.toString(), 6);
     const repayAmt = requested > pos.debtUsdc ? pos.debtUsdc : requested;
-    const arcBal = (await usdcBalance(arc, ARC_TESTNET.usdc, client.account)) ;
-    const arcNative = (await arc.getBalance({ address: client.account })) / 1_000_000_000_000n;
-    const fromArc = arcBal + arcNative >= repayAmt;
+    // On Arc the ERC-20 view and the native balance are the same USDC — read exactly one of them.
+    const arcUsdc6 = await usdcBalance(arc, ARC_TESTNET.usdc, client.account);
+    const fromArc = arcUsdc6 >= repayAmt;
     const clears = repayAmt >= pos.debtUsdc;
     const reqs: ActionRequest[] = [];
     if (fromArc) {

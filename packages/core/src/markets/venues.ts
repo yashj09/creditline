@@ -57,24 +57,7 @@ export async function fetchMarkets(opts: FetchMarketsOptions): Promise<MarketsSn
   // Executable twin: live Compound v3 Base Sepolia numbers (real Circle USDC, CCTP → Arc).
   try {
     const client = opts.baseSepoliaClient ?? createPublicClient({ chain: chains.baseSepolia, transport: http() });
-    const pos = await readCometPosition(client, "0x0000000000000000000000000000000000000001");
-    rates.push({
-      venueId: "compound-v3-base-sepolia",
-      protocol: "compound-v3",
-      network: "base-sepolia",
-      chainId: BASE_SEPOLIA.chainId,
-      marketName: "cUSDCv3 (testnet twin of Compound v3 Base)",
-      asset: "USDC",
-      borrowAprPct: pos.borrowAprPct,
-      supplyAprPct: pos.supplyAprPct,
-      utilizationPct: pos.utilizationPct,
-      availableUsd: Number(pos.availableUsdc) / 1e6,
-      totalBorrowUsd: 0,
-      totalDepositUsd: Number(pos.availableUsdc) / 1e6,
-      source: "messari-standardized", // rate semantics identical; sourced from the Comet contract itself
-      observedAt: Math.floor(Date.now() / 1000),
-      executable: COMPOUND_V3_BASE_TWIN,
-    });
+    rates.push(await compoundTwinRate(client));
   } catch (e) {
     warnings.push(`compound base sepolia: ${(e as Error).message}`);
   }
@@ -84,6 +67,18 @@ export async function fetchMarkets(opts: FetchMarketsOptions): Promise<MarketsSn
 
 /** Chains for which core/exec has a working executor. Keep in sync with plan/build.ts. */
 export const IMPLEMENTED_EXECUTOR_CHAINS = new Set<number>([84532]);
+
+/** Live rate of the executable Compound v3 Base Sepolia twin, read from the Comet contract itself. */
+export async function compoundTwinRate(client: PublicClient): Promise<VenueRate> {
+  const pos = await readCometPosition(client, "0x0000000000000000000000000000000000000001");
+  return {
+    venueId: "compound-v3-base-sepolia", protocol: "compound-v3", network: "base-sepolia", chainId: BASE_SEPOLIA.chainId,
+    marketName: "cUSDCv3 (testnet twin of Compound v3 Base)", asset: "USDC",
+    borrowAprPct: pos.borrowAprPct, supplyAprPct: pos.supplyAprPct, utilizationPct: pos.utilizationPct,
+    availableUsd: Number(pos.availableUsdc) / 1e6, totalBorrowUsd: 0, totalDepositUsd: Number(pos.availableUsdc) / 1e6,
+    source: "onchain", observedAt: Math.floor(Date.now() / 1000), executable: COMPOUND_V3_BASE_TWIN,
+  };
+}
 
 export interface Ranked {
   cheapestMainnet: VenueRate | undefined;

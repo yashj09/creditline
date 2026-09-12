@@ -7,6 +7,11 @@ import type { PendingApproval, Store, StoredApproval } from "./types.ts";
 interface ApprovalsFile { pending: Record<string, PendingApproval>; signed: Record<string, StoredApproval> }
 
 /** JSON files under `dir`: plans/<id>.json, approvals.json, audit.jsonl. Single machine, no locking. */
+const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/;
+function assertId(id: string) {
+  if (!SAFE_ID.test(id)) throw new Error(`invalid plan id "${id}"`);
+}
+
 export function fileStore(dir: string): Store {
   mkdirSync(resolve(dir, "plans"), { recursive: true });
   const approvalsPath = resolve(dir, "approvals.json");
@@ -20,8 +25,8 @@ export function fileStore(dir: string): Store {
   const writeA = (f: ApprovalsFile) => writeFileSync(approvalsPath, JSON.stringify(f, null, 2));
   return {
     plans: {
-      async get(id) { const p = resolve(dir, "plans", `${id}.json`); return existsSync(p) ? (JSON.parse(readFileSync(p, "utf8")) as Plan) : null; },
-      async save(plan) { writeFileSync(resolve(dir, "plans", `${plan.id}.json`), JSON.stringify(plan, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2)); },
+      async get(id) { if (!SAFE_ID.test(id)) return null; const p = resolve(dir, "plans", `${id}.json`); return existsSync(p) ? (JSON.parse(readFileSync(p, "utf8")) as Plan) : null; },
+      async save(plan) { assertId(plan.id); writeFileSync(resolve(dir, "plans", `${plan.id}.json`), JSON.stringify(plan, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2)); },
       async list() {
         return readdirSync(resolve(dir, "plans")).filter((f) => f.endsWith(".json"))
           .map((f) => JSON.parse(readFileSync(resolve(dir, "plans", f), "utf8")) as Plan)

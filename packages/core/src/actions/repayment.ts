@@ -1,4 +1,6 @@
-import { encodeFunctionData, type Address } from "viem";
+import { encodeFunctionData, keccak256, toBytes, type Address } from "viem";
+
+const REPAYMENT_SCHEDULED_TOPIC = keccak256(toBytes("RepaymentScheduled(uint256,uint64,uint128,address)"));
 import { MandateAccountAbi } from "../abi/MandateAccount.ts";
 import { ARC_TESTNET, BASE_SEPOLIA } from "../addresses.ts";
 import { encodeScheduleRepayment } from "../exec/account.ts";
@@ -23,14 +25,18 @@ export const scheduleRepayment: ActionAdapter<ScheduleParams> = {
       direct: { to: ctx.account, data: encodeScheduleRepayment(dueAt, amount, p.venue ?? BASE_SEPOLIA.comet) },
     };
   },
+  async afterExecute(_p, receipt) {
+    const log = receipt.logs.find((l) => l.topics[0]?.toLowerCase() === REPAYMENT_SCHEDULED_TOPIC);
+    return log?.topics[1] ? { repaymentId: Number(BigInt(log.topics[1])) } : {};
+  },
   async isExecuted(p, ctx) {
     const due = BigInt(p.dueAt), amount = BigInt(p.amountUsdc6); // params come back from JSON as strings
     const pub = ctx.pub(ARC_TESTNET.chainId);
     const n = await pub.readContract({ address: ctx.account, abi: MandateAccountAbi, functionName: "repaymentCount" });
-    for (let i = n; i > 0n; i--) {
-      const [dueAt, amt] = await pub.readContract({ address: ctx.account, abi: MandateAccountAbi, functionName: "repayments", args: [i - 1n] });
+    // Full scan: due dates are not monotonic in index order (a later intent can be due earlier). The list is short.
+    for (let i = 0n; i < n; i++) {
+      const [dueAt, amt] = await pub.readContract({ address: ctx.account, abi: MandateAccountAbi, functionName: "repayments", args: [i] });
       if (dueAt === due && amt === amount) return true;
-      if (dueAt < due - 86400n) break;
     }
     return false;
   },

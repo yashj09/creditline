@@ -1,20 +1,29 @@
 {
   "name": "@yashjain99/mandate-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "development": "./src/index.ts"
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
     },
     "./ledger-web": {
       "types": "./dist/ledger-web.d.ts",
-      "import": "./dist/ledger-web.js",
-      "development": "./src/ledger-web.ts"
+      "development": "./src/ledger-web.ts",
+      "import": "./dist/ledger-web.js"
     },
-    "./src/*": "./src/*",
+    "./abi": {
+      "types": "./dist/abi.d.ts",
+      "development": "./src/abi.ts",
+      "import": "./dist/abi.js"
+    },
+    "./chains": {
+      "types": "./dist/chains.d.ts",
+      "development": "./src/chains.ts",
+      "import": "./dist/chains.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -50,7 +59,6 @@
     "dist",
     "README.md"
   ],
-  "sideEffects": false,
   "peerDependencies": {
     "viem": "^2.30.0"
   },
@@ -92,6 +100,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/yashj09/mandate",
-    "directory": "packages/sdk"
+    "directory": "packages/core"
+  },
+  "optionalDependencies": {
+    "@circle-fin/developer-controlled-wallets": "^10.8.0"
   }
 }

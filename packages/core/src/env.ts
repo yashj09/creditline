@@ -6,6 +6,9 @@ import { fileStore } from "./store/file.ts";
 import { memoryStore } from "./store/memory.ts";
 import { CircleAgentWallet } from "./wallet/circle.ts";
 import { LocalAgentWallet } from "./wallet/local.ts";
+import { ReadOnlyAgentWallet } from "./wallet/readonly.ts";
+import { MandateAccountAbi } from "./abi/MandateAccount.ts";
+import { createPublicClient, http } from "viem";
 import { localGuardian } from "./guardian/local.ts";
 
 /**
@@ -26,16 +29,15 @@ export function createMandateFromEnv(overrides: Partial<MandateConfig> & { env?:
     [chains.arcTestnet.id]: { chain: chains.arcTestnet, rpc: rpc(5042002, "ARC_TESTNET_RPC") },
   };
   const useCircle = !!(env.CIRCLE_API_KEY && env.CIRCLE_ENTITY_SECRET && env.CIRCLE_WALLET_SET_ID);
+  const firstChain = Object.values(chainsCfg)[0]!;
   const wallet = overrides.wallet ?? (useCircle
     ? new CircleAgentWallet({ apiKey: env.CIRCLE_API_KEY!, entitySecret: env.CIRCLE_ENTITY_SECRET!, walletSetId: env.CIRCLE_WALLET_SET_ID! })
-    : new LocalAgentWallet(requireEnv(env, "AGENT_PRIVATE_KEY") as Hex, Object.fromEntries(Object.entries(chainsCfg).map(([id, c]) => [Number(id), c.chain]))));
+    : env.AGENT_PRIVATE_KEY
+      ? new LocalAgentWallet(env.AGENT_PRIVATE_KEY as Hex, chainsCfg) // configured RPCs apply to sends too
+      // No key: read-only mode. Positions, plans and approval text work; execution fails with a clear message.
+      : new ReadOnlyAgentWallet(() => createPublicClient({ chain: firstChain.chain, transport: http(firstChain.rpc) }).readContract({ address: account, abi: MandateAccountAbi, functionName: "agent" })));
   const store = overrides.store ?? (env.MANDATE_STORE_DIR ? fileStore(env.MANDATE_STORE_DIR) : memoryStore());
   const guardian = overrides.guardian ?? (env.MANDATE_GUARDIAN_KEY ? localGuardian(env.MANDATE_GUARDIAN_KEY as Hex) : undefined);
   return createMandate({ ...overrides, chains: chainsCfg, account, wallet, store, guardian, graphApiKey: overrides.graphApiKey ?? env.GRAPH_API_KEY });
 }
 
-function requireEnv(env: NodeJS.ProcessEnv, k: string): string {
-  const v = env[k];
-  if (!v) throw new Error(`missing env ${k}`);
-  return v;
-}
