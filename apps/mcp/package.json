@@ -1,22 +1,52 @@
 {
-  "name": "@mandate/mcp",
+  "name": "@yashjain99/mandate-mcp",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
-  "bin": { "mandate-mcp": "./src/server.ts" },
+  "bin": {
+    "mandate-mcp": "./dist/server.js"
+  },
   "scripts": {
     "start": "tsx src/server.ts",
     "start:http": "tsx src/server.ts --http 3111",
+    "build": "tsup",
+    "prepack": "pnpm build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mandate/agent": "workspace:*",
-    "@mandate/core": "workspace:*",
+    "@yashjain99/mandate-ai": "workspace:*",
+    "@yashjain99/mandate-sdk": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "ai": "^7.0.93",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
     "viem": "^2.56.3",
     "zod": "^4.5.4"
   },
-  "devDependencies": { "@types/express": "^5.0.0", "@types/node": "^22.18.0", "tsx": "^4.20.0", "typescript": "^5.9.0" }
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.18.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "tsup": "^8.5.0"
+  },
+  "license": "MIT",
+  "description": "MCP server that lets Claude Desktop / Cursor / any MCP client operate a Mandate account: plan, simulate, guardian-approve and execute on-chain steps under a bounded mandate.",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agents",
+    "mandate",
+    "ledger",
+    "usdc"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yashj09/mandate",
+    "directory": "apps/mcp"
+  }
 }

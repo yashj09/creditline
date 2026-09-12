@@ -1,8 +1,8 @@
 "use client";
 import { createPublicClient, createWalletClient, custom, http, type Address, type Hex } from "viem";
 // Client bundle: import only browser-safe modules (no fs).
-import { MandateAccountAbi } from "@mandate/core/src/abi/MandateAccount.ts";
-import { chains } from "@mandate/core/src/chains.ts";
+import { MandateAccountAbi } from "@yashjain99/mandate-sdk/src/abi/MandateAccount.ts";
+import { chains } from "@yashjain99/mandate-sdk/src/chains.ts";
 
 /**
  * Owner actions are signed by the user's own browser wallet (EIP-1193) — never by the server. The owner can tighten,

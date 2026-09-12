@@ -16,8 +16,6 @@
     "@ledgerhq/device-management-kit": "^1.9.0",
     "@ledgerhq/device-signer-kit-ethereum": "^1.18.0",
     "@ledgerhq/device-transport-kit-web-hid": "^1.2.4",
-    "@mandate/agent": "workspace:*",
-    "@mandate/core": "workspace:*",
     "ai": "^7.0.93",
     "dotenv": "^17.2.0",
     "lucide-react": "^1.45.0",
@@ -28,7 +26,9 @@
     "remark-gfm": "^4.0.1",
     "rxjs": "^7.8.2",
     "viem": "^2.56.3",
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "@yashjain99/mandate-ai": "workspace:*",
+    "@yashjain99/mandate-sdk": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
