@@ -1,0 +1,8 @@
+{
+  "name": "example-vercel-ai-agent",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "tsx index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@ai-sdk/amazon-bedrock": "^5.0.75", "@ai-sdk/anthropic": "^4.0.49", "@yashjain99/mandate-ai": "workspace:*", "@yashjain99/mandate-sdk": "workspace:*", "ai": "^7.0.93", "dotenv": "^17.2.0", "viem": "^2.56.3" },
+  "devDependencies": { "@types/node": "^22.18.0", "tsx": "^4.20.0", "typescript": "^5.9.0" }
+}
