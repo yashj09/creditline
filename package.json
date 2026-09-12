@@ -10,6 +10,9 @@
     "contracts:test": "forge test --root contracts -vv",
     "typecheck": "pnpm -r typecheck",
     "dev": "pnpm --filter @mandate/web dev",
-    "e2e": "pnpm --filter @mandate/core e2e"
+    "e2e": "pnpm --filter @yashjain99/mandate-sdk e2e",
+    "build:packages": "pnpm -r --filter @yashjain99/mandate-sdk --filter @yashjain99/mandate-ai --filter @yashjain99/mandate-mcp build",
+    "publish:packages": "pnpm -r --filter @yashjain99/mandate-sdk --filter @yashjain99/mandate-ai --filter @yashjain99/mandate-mcp publish --access public --no-git-checks",
+    "test": "pnpm --filter @yashjain99/mandate-sdk test"
   }
 }
