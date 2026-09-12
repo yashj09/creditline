@@ -1,3 +1,13 @@
+// @yashjain99/mandate-sdk — bounded delegation for AI agents.
+export * from "./client.ts";
+export * from "./env.ts";
+export * from "./account.ts";
+export * from "./errors.ts";
+export * from "./actions/index.ts";
+export * from "./plan/schema.ts";
+export * from "./plan/recipes.ts";
+export * from "./store/index.ts";
+export * from "./guardian/index.ts";
 export * from "./chains.ts";
 export * from "./addresses.ts";
 export * from "./abi/protocols.ts";
@@ -13,6 +23,4 @@ export * from "./wallet/local.ts";
 export * from "./wallet/circle.ts";
 export * from "./audit/log.ts";
 export * from "./markets/index.ts";
-export * from "./plan/schema.ts";
-export * from "./plan/build.ts";
 export * from "./sim/simulate.ts";

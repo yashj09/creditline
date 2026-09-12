@@ -36,6 +36,8 @@ export const StepSchema = z.object({
   calls: z.array(CallSchema),
   /** Tx the agent wallet sends directly (not through the account), e.g. receiveMessage. */
   direct: z.object({ to: z.string(), data: z.string() }).optional(),
+  /** The action adapter's input, kept so execution can probe idempotency / resolve calldata. bigints serialized as strings. */
+  params: z.record(z.string(), z.any()).optional(),
   status: z.enum(["pending", "simulated", "awaiting_guardian", "executing", "done", "failed", "skipped"]).default("pending"),
   txHash: z.string().optional(),
   explorer: z.string().optional(),
